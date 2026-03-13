@@ -1,0 +1,15 @@
+{
+    "configurations": [
+        {
+            "name": "Linux",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "/usr/include/fuse3"
+            ],
+            "defines": [],
+            "cStandard": "gnu99",
+            "compilerPath": "/usr/bin/gcc"
+        }
+    ],
+    "version": 4
+}
