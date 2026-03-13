@@ -78,7 +78,7 @@ static int xmp_getattr(const char *path, struct stat *stbuf,
         if (fi)
         {
                 struct my_file_handle *myfh = (struct my_file_handle *)fi->fh;
-                res = fstat(myfh->fd, stbuf);
+                res = fstat(myfh->fd_file, stbuf);
         }
         else
         {
@@ -484,7 +484,9 @@ static int xmp_create(const char *path, mode_t mode, struct fuse_file_info *fi)
         struct my_file_handle *h = malloc(sizeof(struct my_file_handle));
         if (!h)
                 return -ENOMEM;
-        h->fd = fd;
+        h->fd_file = fd;
+        h->fd_vf = fd_vf;
+        h->fd_vt = fd_vt; 
         strncpy(h->path, new_path, MAX_PATH_LEN - 1);
         h->path[MAX_PATH_LEN - 1] = '\0';
         fi->fh = (uint64_t)h;
@@ -499,7 +501,8 @@ static int xmp_open(const char *path, struct fuse_file_info *fi)
         char new_path[MAX_PATH_LEN];
         append_path(path, new_path);
         printf("[DEBUG] [myfs.c] xmp_open() called\n");
-        if(fi->flags & O_TRUNC) {
+        if (fi->flags & O_TRUNC)
+        {
                 int fd_disk = open(DISK_FILE, O_RDWR | O_APPEND, 0644);
                 save_entire_file(new_path, fd_disk);
         }
@@ -507,6 +510,22 @@ static int xmp_open(const char *path, struct fuse_file_info *fi)
         if (fd == -1)
                 return -errno;
 
+        char version_file[PATH_MAX];
+        char version_table[PATH_MAX];
+
+        snprintf(version_file, sizeof(version_file), "%s.vf", new_path);
+        snprintf(version_table, sizeof(version_table), "%s.vt", new_path);
+
+        int fd_vf = open(version_file, O_CREAT | O_RDWR, 0644);
+        if (fd_vf == -1)
+                return -errno;
+
+        int fd_vt = open(version_table, O_CREAT | O_RDWR, 0644);
+        if (fd_vt == -1)
+        {
+                close(fd_vt);
+                return -errno;
+        }
         /* Enable direct_io when open has flags O_DIRECT to enjoy the feature
            parallel_direct_writes (i.e., to get a shared lock, not exclusive lock,
            for writes to the same file). */
@@ -518,7 +537,9 @@ static int xmp_open(const char *path, struct fuse_file_info *fi)
         struct my_file_handle *h = malloc(sizeof(struct my_file_handle));
         if (!h)
                 return -ENOMEM;
-        h->fd = fd;
+        h->fd_file = fd;
+        h->fd_vf = fd_vf;
+        h->fd_vt = fd_vt;
         strncpy(h->path, new_path, MAX_PATH_LEN - 1);
         h->path[MAX_PATH_LEN - 1] = '\0';
         fi->fh = (uint64_t)h;
@@ -528,7 +549,7 @@ static int xmp_open(const char *path, struct fuse_file_info *fi)
 static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
                     struct fuse_file_info *fi)
 {
-        struct my_file_handle* myfh = (struct my_file_handle*) fi->fh;
+        struct my_file_handle *myfh = (struct my_file_handle *)fi->fh;
         if (is_internal_file(path))
                 return -ENOENT;
         printf("[DEBUG] [myfs.c] xmp_read() called, path: %s\n", path);
@@ -537,7 +558,7 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
         if (!is_internal_file(path))
         {
 
-                res = pread(myfh->fd, buf, size, offset);
+                res = pread(myfh->fd_file, buf, size, offset);
                 if (res == -1)
                         res = -errno;
 
@@ -548,29 +569,29 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
         return res;
 }
 
-static int xmp_read_buf(const char *path, struct fuse_bufvec **bufp,
-                        size_t size, off_t offset, struct fuse_file_info *fi)
-{
-        if (is_internal_file(path))
-                return -ENOENT;
-        struct fuse_bufvec *src;
+// static int xmp_read_buf(const char *path, struct fuse_bufvec **bufp,
+//                         size_t size, off_t offset, struct fuse_file_info *fi)
+// {
+//         if (is_internal_file(path))
+//                 return -ENOENT;
+//         struct fuse_bufvec *src;
 
-        printf("[DEBUG] [myfs.c] xmp_read_buf() called\n");
+//         printf("[DEBUG] [myfs.c] xmp_read_buf() called\n");
 
-        src = malloc(sizeof(struct fuse_bufvec));
-        if (src == NULL)
-                return -ENOMEM;
+//         src = malloc(sizeof(struct fuse_bufvec));
+//         if (src == NULL)
+//                 return -ENOMEM;
 
-        *src = FUSE_BUFVEC_INIT(size);
+//         *src = FUSE_BUFVEC_INIT(size);
 
-        src->buf[0].flags = FUSE_BUF_IS_FD | FUSE_BUF_FD_SEEK;
-        src->buf[0].fd = fi->fh;
-        src->buf[0].pos = offset;
+//         src->buf[0].flags = FUSE_BUF_IS_FD | FUSE_BUF_FD_SEEK;
+//         src->buf[0].fd = fi->fh;
+//         src->buf[0].pos = offset;
 
-        *bufp = src;
+//         *bufp = src;
 
-        return 0;
-}
+//         return 0;
+// }
 
 static int xmp_write(const char *path, const char *buf, size_t size,
                      off_t offset, struct fuse_file_info *fi)
@@ -582,47 +603,40 @@ static int xmp_write(const char *path, const char *buf, size_t size,
         if (is_internal_file(myfh->path))
                 return -ENOENT;
         int res;
-
-        char vt_path[MAX_PATH_LEN];
-        char vf_path[MAX_PATH_LEN];
+        
         char *disk_path = DISK_FILE;
-
-        snprintf(vt_path, sizeof(vt_path), "%s.vt", myfh->path);
-        snprintf(vf_path, sizeof(vf_path), "%s.vf", myfh->path);
-
-        int fd_vt = open(vt_path, O_RDWR, 0644);
-        int fd_vf = open(vf_path, O_APPEND, 0644);
-        int fd_disk = open(disk_path, O_APPEND | O_RDWR, 0644);
-
+        int fd_disk = open(disk_path, O_RDWR | O_APPEND);
         uint64_t a = 0;
-        uint64_t* p_blocks_amount = &a;
+        uint64_t *p_blocks_amount = &a;
 
         uint64_t *changed_blocks = count_affected_blocks(size, offset, p_blocks_amount);
-        if(store_blocks(changed_blocks, *p_blocks_amount, fd_disk, myfh->fd) != 0) return -errno;
-        update_version_counter(fd_vt);
-        res = pwrite(myfh->fd, buf, size, offset);
+        if (store_blocks(changed_blocks, *p_blocks_amount, fd_disk, myfh->fd_file) != 0)
+                return -errno;
+        update_version_counter(myfh->fd_vt);
+        res = pwrite(myfh->fd_file, buf, size, offset);
         if (res == -1)
                 res = -errno;
         //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
         free(changed_blocks);
+        close(fd_disk);
         return res;
 }
 
-static int xmp_write_buf(const char *path, struct fuse_bufvec *buf,
-                         off_t offset, struct fuse_file_info *fi)
-{
-        if (is_internal_file(path))
-                return -ENOENT;
-        struct fuse_bufvec dst = FUSE_BUFVEC_INIT(fuse_buf_size(buf));
+// static int xmp_write_buf(const char *path, struct fuse_bufvec *buf,
+//                          off_t offset, struct fuse_file_info *fi)
+// {
+//         if (is_internal_file(path))
+//                 return -ENOENT;
+//         struct fuse_bufvec dst = FUSE_BUFVEC_INIT(fuse_buf_size(buf));
 
-        printf("[DEBUG] [myfs.c] xmp_write_buf() called\n");
+//         printf("[DEBUG] [myfs.c] xmp_write_buf() called\n");
 
-        dst.buf[0].flags = FUSE_BUF_IS_FD | FUSE_BUF_FD_SEEK;
-        dst.buf[0].fd = fi->fh;
-        dst.buf[0].pos = offset;
+//         dst.buf[0].flags = FUSE_BUF_IS_FD | FUSE_BUF_FD_SEEK;
+//         dst.buf[0].fd = fi->fh;
+//         dst.buf[0].pos = offset;
 
-        return fuse_buf_copy(&dst, buf, FUSE_BUF_SPLICE_NONBLOCK);
-}
+//         return fuse_buf_copy(&dst, buf, FUSE_BUF_SPLICE_NONBLOCK);
+// }
 
 static int xmp_statfs(const char *path, struct statvfs *stbuf)
 {
@@ -652,7 +666,7 @@ static int xmp_flush(const char *path, struct fuse_file_info *fi)
            close the file.  This is important if used on a network
            filesystem like NFS which flush the data/metadata on close() */
         struct my_file_handle *myfh = (struct my_file_handle *)fi->fh;
-        res = close(dup(myfh->fd));
+        res = close(dup(myfh->fd_file));
         if (res == -1)
                 return -errno;
 
@@ -666,8 +680,12 @@ static int xmp_release(const char *path, struct fuse_file_info *fi)
         printf("[DEBUG] [myfs.c] xmp_release() called\n");
         struct my_file_handle *myfh = (struct my_file_handle *)fi->fh;
 
-        if (myfh->fd)
-                close(myfh->fd);
+        if (myfh->fd_file)
+                close(myfh->fd_file);
+        if(myfh->fd_vf)
+                close(myfh->fd_vf);
+        if(myfh->fd_vt)
+                close(myfh->fd_vt);
         free(myfh);
         return 0;
 }

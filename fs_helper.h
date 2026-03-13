@@ -10,7 +10,9 @@
 #include "stdint.h"
 
 struct my_file_handle {
-    int fd;                 
+    int fd_file;
+    int fd_vf;
+    int fd_vt;                 
     char path[MAX_PATH_LEN];    
 };
 void append_path(const char *path, char *out);

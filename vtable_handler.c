@@ -47,4 +47,5 @@ uint64_t get_version(int fd_table)
     uint64_t version;
     if (read(fd_table, &version, sizeof(version)) == -1)
         return -errno;
+    return version;
 }

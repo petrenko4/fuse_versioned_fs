@@ -21,6 +21,7 @@ int save_entire_file(char* path, int fd_disk) {
 
     for (uint64_t i = 0; i < total_blocks; i++)
     {
+        //for readability
         char buffer[BLOCK_SIZE] = {'\0'};
 
         if (lseek(fd_file, i * BLOCK_SIZE, SEEK_SET) == -1)
@@ -32,6 +33,7 @@ int save_entire_file(char* path, int fd_disk) {
         if (lseek(fd_file, BLOCK_SIZE, SEEK_CUR) == -1)
             return -errno;
     }
+    return 0;
 }
 
 int store_blocks(uint64_t *blocks, uint64_t count, int fd_disk, int fd_file)
@@ -48,6 +50,7 @@ int store_blocks(uint64_t *blocks, uint64_t count, int fd_disk, int fd_file)
     for (uint64_t i = 0; i < diff; i++)
     {
         uint64_t block = blocks[i];
+        //for readability
         char buffer[BLOCK_SIZE] = {'\0'};
 
         if (lseek(fd_file, block * BLOCK_SIZE, SEEK_SET) == -1)

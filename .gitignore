@@ -1,4 +1,5 @@
 fuse/*
 mnt/*
 .vscode/
+myfs
 
