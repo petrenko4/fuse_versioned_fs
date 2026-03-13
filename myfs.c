@@ -45,7 +45,7 @@ static void *xmp_init(struct fuse_conn_info *conn,
         append_path("/", out);
         fopen(DISK_FILE, "w+");
         // printf("[DEBUG] [myfs.c] xmp_init() called\n");
-        printf("Hello world! Versioned filesystem is mounted at %s\n", out);
+        printf("Versioned filesystem is mounted at %s\n", out);
 
         /* parallel_direct_writes feature depends on direct_io features.
            To make parallel_direct_writes valid, need either set cfg->direct_io
@@ -460,7 +460,7 @@ static int xmp_create(const char *path, mode_t mode, struct fuse_file_info *fi)
         char new_path[MAX_PATH_LEN];
         append_path(path, new_path);
         printf("[DEBUG] [myfs.c] xmp_create() called\n");
-        fd = open(new_path, O_CREAT | O_RDWR, 0644);
+        fd = open(new_path, (fi->flags & ~O_ACCMODE) | O_RDWR, mode);
         if (fd == -1)
                 return -errno;
 
@@ -499,7 +499,11 @@ static int xmp_open(const char *path, struct fuse_file_info *fi)
         char new_path[MAX_PATH_LEN];
         append_path(path, new_path);
         printf("[DEBUG] [myfs.c] xmp_open() called\n");
-        fd = open(new_path, O_RDWR, 0644);
+        if(fi->flags & O_TRUNC) {
+                int fd_disk = open(DISK_FILE, O_RDWR | O_APPEND, 0644);
+                save_entire_file(new_path, fd_disk);
+        }
+        fd = open(new_path, (fi->flags & ~O_ACCMODE) | O_RDWR, 0644);
         if (fd == -1)
                 return -errno;
 
