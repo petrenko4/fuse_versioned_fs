@@ -2,4 +2,4 @@ fuse/*
 mnt/*
 .vscode/
 myfs
-
+run.sh

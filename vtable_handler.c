@@ -27,18 +27,17 @@ int vt_insert(int fd_table, uint32_t version, off_t offset)
     return 0;
 }
 
-int update_version_counter(int fd_table)
+uint64_t update_version_counter(int fd_table)
 {
     uint64_t old_version;
-    if (read(fd_table, &old_version, sizeof(old_version)) == -1)
+    if (pread(fd_table, &old_version, sizeof(old_version), 0) == -1)
         return -errno;
     uint64_t new_version = old_version + 1;
-    lseek(fd_table, 0, SEEK_SET);
-    if (write(fd_table, &new_version, sizeof(new_version)) == -1)
+    if (pwrite(fd_table, &new_version, sizeof(new_version), 0) == -1)
         return -errno;
 
     printf("Version updated");
-    return 0;
+    return new_version;
 }
 
 uint64_t get_version(int fd_table)
