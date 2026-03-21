@@ -501,15 +501,6 @@ static int xmp_open(const char *path, struct fuse_file_info *fi)
         char new_path[MAX_PATH_LEN];
         append_path(path, new_path);
         printf("[DEBUG] [myfs.c] xmp_open() called\n");
-        if (fi->flags & O_TRUNC)
-        {
-                int fd_disk = open(DISK_FILE, O_RDWR | O_APPEND, 0644);
-                save_entire_file(new_path, fd_disk);
-        }
-        fd = open(new_path, (fi->flags & ~O_ACCMODE) | O_RDWR, 0644);
-        if (fd == -1)
-                return -errno;
-
         char version_file[PATH_MAX];
         char version_table[PATH_MAX];
 
@@ -537,12 +528,34 @@ static int xmp_open(const char *path, struct fuse_file_info *fi)
         struct my_file_handle *h = malloc(sizeof(struct my_file_handle));
         if (!h)
                 return -ENOMEM;
-        h->fd_file = fd;
         h->fd_vf = fd_vf;
         h->fd_vt = fd_vt;
         strncpy(h->path, new_path, MAX_PATH_LEN - 1);
         h->path[MAX_PATH_LEN - 1] = '\0';
         fi->fh = (uint64_t)h;
+        // if (fi->flags & O_TRUNC)
+        // {
+        //         int fd_disk = open(DISK_FILE, O_RDWR | O_APPEND, 0644);
+        //         uint64_t version = update_version_counter(h->fd_vt);
+        //         off_t vt_off = version * sizeof(uint64_t) + sizeof(uint64_t);
+
+        //         // update version table file
+        //         uint64_t offset_for_vf = lseek(h->fd_vf, 0, SEEK_END);
+        //         if (pwrite(h->fd_vt, &offset_for_vf, sizeof(offset_for_vf), vt_off) != sizeof(offset_for_vf))
+        //                 return -errno;
+
+        //         // write version number to the version file
+        //         if (write(h->fd_vf, &version, sizeof(version)) != sizeof(version))
+        //                 return -errno;
+
+        //         if (save_entire_file(new_path, fd_disk, fd_vf) != 0)
+        //                 return -errno;
+        // }
+        fd = open(new_path, (fi->flags & ~O_ACCMODE) | O_RDWR, 0644);
+        if (fd == -1)
+                return -errno;
+
+        h->fd_file = fd;
         return 0;
 }
 
@@ -612,20 +625,23 @@ static int xmp_write(const char *path, const char *buf, size_t size,
         uint64_t version = update_version_counter(myfh->fd_vt);
         off_t vt_off = version * sizeof(uint64_t) + sizeof(uint64_t);
 
-        //update version table file
+        // update version table file
         uint64_t offset_for_vf = lseek(myfh->fd_vf, 0, SEEK_END);
-        if(pwrite(myfh->fd_vt, &offset_for_vf, sizeof(offset_for_vf), vt_off) != sizeof(offset_for_vf)) return -errno;
+        if (pwrite(myfh->fd_vt, &offset_for_vf, sizeof(offset_for_vf), vt_off) != sizeof(offset_for_vf))
+                return -errno;
 
-        //write version number to the version file
-        if (write(myfh->fd_vf, &version, sizeof(version)) != sizeof(version)) return -errno;
+        // write version number to the version file
+        if (write(myfh->fd_vf, &version, sizeof(version)) != sizeof(version))
+                return -errno;
+
+        res = pwrite(myfh->fd_file, buf, size, offset);
+        if (res == -1)
+                res = -errno;
+
         uint64_t *changed_blocks = count_affected_blocks(size, offset, p_blocks_amount);
         if (store_blocks(changed_blocks, *p_blocks_amount, fd_disk, myfh->fd_file, myfh->fd_vt, myfh->fd_vf, version) != 0)
                 return -errno;
 
-                
-        res = pwrite(myfh->fd_file, buf, size, offset);
-        if (res == -1)
-                res = -errno;
         //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
         free(changed_blocks);
         close(fd_disk);

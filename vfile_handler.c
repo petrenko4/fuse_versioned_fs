@@ -9,29 +9,38 @@
 #include "errno.h"
 #include <sys/stat.h>
 
-int save_entire_file(char *path, int fd_disk)
+int save_entire_file(char *path, int fd_disk, int fd_vf)
 {
 
     struct stat st;
     int fd_file = open(path, O_RDWR, 0644);
+    if (fd_file == -1)
+        return -errno;
     if (fstat(fd_file, &st) == -1)
         return -errno;
 
     off_t size = st.st_size;
     uint64_t total_blocks = (size + BLOCK_SIZE - 1) / BLOCK_SIZE;
 
+    if (write(fd_vf, &size, sizeof(size)) != sizeof(size))
+        return errno;
+    if (lseek(fd_vf, 0, SEEK_END) == -1)
+        return -errno;
+
     for (uint64_t i = 0; i < total_blocks; i++)
     {
+        uint64_t block = i;
         // for readability
         char buffer[BLOCK_SIZE] = {'\0'};
 
-        if (lseek(fd_file, i * BLOCK_SIZE, SEEK_SET) == -1)
+        if (lseek(fd_file, block * BLOCK_SIZE, SEEK_SET) == -1)
             return -errno;
         if (read(fd_file, buffer, sizeof(buffer)) == -1)
             return -errno;
         if (write(fd_disk, buffer, sizeof(buffer)) == -1)
             return -errno;
-        if (lseek(fd_file, BLOCK_SIZE, SEEK_CUR) == -1)
+        uint64_t whence_disk = (lseek(fd_disk, 0, SEEK_END) / BLOCK_SIZE) - 1;
+        if (write(fd_vf, &whence_disk, sizeof(whence_disk)) == -1)
             return -errno;
     }
     return 0;
@@ -85,14 +94,15 @@ int store_blocks(uint64_t *blocks, uint64_t count, int fd_disk, int fd_file, int
 
 uint64_t *count_affected_blocks(size_t size, off_t offset, uint64_t *ba)
 {
-    uint64_t blocks_amount = (size + BLOCK_SIZE - 1) / BLOCK_SIZE;
-    uint64_t fisrt_block = offset / BLOCK_SIZE;
+    uint64_t first_block = offset / BLOCK_SIZE;
+    uint64_t last_block = (offset + size - 1) / BLOCK_SIZE;
+    uint64_t blocks_amount = last_block - first_block + 1;
     *ba = blocks_amount;
     //!!!!!!!!!!!!!!!!!!!!!!!!!!
     uint64_t *changed_blocks = malloc(blocks_amount * sizeof(uint64_t));
     if (!changed_blocks)
         return NULL;
-    uint64_t k = fisrt_block;
+    uint64_t k = first_block;
     for (uint64_t i = 0; i < blocks_amount; i++)
     {
         changed_blocks[i] = k;

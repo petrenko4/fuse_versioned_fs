@@ -3,3 +3,5 @@ mnt/*
 .vscode/
 myfs
 run.sh
+test_sequence.sh
+disk
