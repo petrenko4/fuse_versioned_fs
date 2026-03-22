@@ -464,8 +464,8 @@ static int xmp_create(const char *path, mode_t mode, struct fuse_file_info *fi)
         if (fd == -1)
                 return -errno;
 
-        char version_file[PATH_MAX];
-        char version_table[PATH_MAX];
+        char version_file[MAX_PATH_LEN];
+        char version_table[MAX_PATH_LEN];
 
         snprintf(version_file, sizeof(version_file), "%s.vf", new_path);
         snprintf(version_table, sizeof(version_table), "%s.vt", new_path);
@@ -623,7 +623,7 @@ static int xmp_write(const char *path, const char *buf, size_t size,
         uint64_t *p_blocks_amount = &a;
 
         uint64_t version = update_version_counter(myfh->fd_vt);
-        off_t vt_off = version * sizeof(uint64_t) + sizeof(uint64_t);
+        off_t vt_off = version * sizeof(uint64_t);
 
         // update version table file
         uint64_t offset_for_vf = lseek(myfh->fd_vf, 0, SEEK_END);
