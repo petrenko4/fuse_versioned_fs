@@ -4,6 +4,8 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <assert.h>
+#include <math.h>
 #include "fs_helper.h"
 #include "vfile_handler.h"
 #include "vtable_handler.h"
@@ -86,7 +88,7 @@ int cmd_list(struct my_file_handle *myfh)
         if (pread(myfh->fd_vf, &version_number, sizeof(version_number), version_offset) == -1)
             return errno;
 
-            uint64_t version_size = 0;
+        uint64_t version_size = 0;
         if (pread(myfh->fd_vf, &version_size, sizeof(version_size), version_offset + sizeof(version_offset)) == -1)
             return errno;
 
@@ -95,8 +97,72 @@ int cmd_list(struct my_file_handle *myfh)
     return 0;
 }
 
-int cmd_read(struct my_file_handle *myfh)
+// traverse previous versions untill pointer to disk found
+uint64_t check_prev_version(struct my_file_handle *myfh, uint64_t version, uint64_t block_number)
 {
+    uint64_t vf_off = 0;
+    if (pread(myfh->fd_vt, &vf_off, sizeof(vf_off), (version - 1) * sizeof(uint64_t)) == -1)
+        return errno;
+
+    uint64_t value = 0;
+    if (pread(myfh->fd_vf, &value, sizeof(value), vf_off + 2 * sizeof(uint64_t) + block_number * sizeof(uint64_t)) == -1)
+        return errno;
+
+    if (!IS_VERSION(value))
+        return value;
+
+    return check_prev_version(myfh, GET_VALUE(value), block_number);
+}
+
+int cmd_read(struct my_file_handle *myfh, uint64_t version)
+{
+    uint64_t buffer[BLOCK_SIZE / sizeof(uint64_t)];
+    uint64_t vf_offset = 0;
+    if (pread(myfh->fd_vt, &vf_offset, sizeof(vf_offset), version * sizeof(uint64_t)) == -1)
+        return errno;
+
+    uint64_t size = 0;
+
+    if (pread(myfh->fd_vf, &size, sizeof(size), vf_offset + sizeof(uint64_t)) == -1)
+        return errno;
+
+    uint64_t next_version_off = vf_offset + 2 * sizeof(uint64_t) + ((size + BLOCK_SIZE - 1) / BLOCK_SIZE) * sizeof(uint64_t);
+
+    vf_offset += 2 * sizeof(uint64_t);
+    for (uint64_t i = vf_offset; i < next_version_off; i += sizeof(uint64_t))
+    {
+        uint64_t value = 0;
+        if (pread(myfh->fd_vf, &value, sizeof(value), i) == -1)
+            return errno;
+
+        uint64_t num_blocks = (next_version_off - vf_offset) / sizeof(uint64_t);
+        uint64_t block_index = (i - vf_offset) / sizeof(uint64_t);
+        int is_last = (block_index == num_blocks - 1);
+        size_t bytes_to_write = (is_last && size % BLOCK_SIZE != 0)
+                                    ? size % BLOCK_SIZE
+                                    : BLOCK_SIZE;
+        if (!IS_VERSION(value))
+        {
+            char *disk_path = DISK_FILE;
+            int fd_disk = open(disk_path, O_RDWR);
+            if (pread(fd_disk, buffer, BLOCK_SIZE, value * BLOCK_SIZE) == -1)
+                return errno;
+            if (write(STDOUT_FILENO, buffer, bytes_to_write) == -1)
+                return errno;
+        }
+        else
+        {
+
+            char *disk_path = DISK_FILE;
+            int fd_disk = open(disk_path, O_RDWR);
+            uint64_t relevant_block = check_prev_version(myfh, version, ((i - vf_offset) / sizeof(uint64_t)));
+            if (pread(fd_disk, buffer, BLOCK_SIZE, relevant_block * BLOCK_SIZE) == -1)
+                return errno;
+
+            if (write(STDOUT_FILENO, buffer, bytes_to_write) == -1)
+                return errno;
+        }
+    }
 
     return 0;
 }
@@ -129,7 +195,7 @@ int main(int argc, char *argv[])
 
         int ret = cmd_list(myfh);
 
-        close_internals(myfh); // release resources
+        close_internals(myfh);
         return ret;
     }
     else if (strcmp(cmd, "read") == 0)
@@ -148,9 +214,9 @@ int main(int argc, char *argv[])
             return 1;
         }
 
-        int ret = cmd_read(myfh);
+        int ret = cmd_read(myfh, strtoull(version, NULL, 10));
 
-        close_internals(myfh); // release resources
+        close_internals(myfh);
         return ret;
     }
     else

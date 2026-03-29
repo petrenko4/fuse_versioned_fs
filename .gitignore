@@ -6,3 +6,5 @@ test_sequence.sh
 disk
 tasklist
 versionview
+networks
+networks_fuse

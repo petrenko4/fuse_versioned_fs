@@ -638,12 +638,10 @@ static int xmp_write(const char *path, const char *buf, size_t size,
         if (res == -1)
                 res = -errno;
 
-        uint64_t *changed_blocks = count_affected_blocks(size, offset, p_blocks_amount);
-        if (store_blocks(changed_blocks, *p_blocks_amount, fd_disk, myfh->fd_file, myfh->fd_vt, myfh->fd_vf, version) != 0)
+        if (store_blocks(size, offset, fd_disk, myfh->fd_file, myfh->fd_vt, myfh->fd_vf, version) != 0)
                 return -errno;
 
         //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-        free(changed_blocks);
         close(fd_disk);
         return res;
 }
