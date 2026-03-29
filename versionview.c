@@ -101,7 +101,7 @@ int cmd_list(struct my_file_handle *myfh)
 uint64_t check_prev_version(struct my_file_handle *myfh, uint64_t version, uint64_t block_number)
 {
     uint64_t vf_off = 0;
-    if (pread(myfh->fd_vt, &vf_off, sizeof(vf_off), (version - 1) * sizeof(uint64_t)) == -1)
+    if (pread(myfh->fd_vt, &vf_off, sizeof(vf_off), version * sizeof(uint64_t)) == -1)
         return errno;
 
     uint64_t value = 0;
@@ -160,6 +160,8 @@ int cmd_read(struct my_file_handle *myfh, uint64_t version)
                 return errno;
 
             if (write(STDOUT_FILENO, buffer, bytes_to_write) == -1)
+                return errno;
+            if(pwrite(myfh->fd_vf, &relevant_block, sizeof(relevant_block), i) == -1) 
                 return errno;
         }
     }
