@@ -434,17 +434,17 @@ static int xmp_chown(const char *path, uid_t uid, gid_t gid,
 static int xmp_truncate(const char *path, off_t size,
                         struct fuse_file_info *fi)
 {
-        if (is_internal_file(path))
-                return -ENOENT;
         int res;
-        char new_path[MAX_PATH_LEN];
-        append_path(path, new_path);
         printf("[DEBUG] [myfs.c] xmp_truncate() called\n");
+        struct my_file_handle* myfh = (struct my_file_handle*)fi->fh;
 
-        if (fi)
-                res = ftruncate(fi->fh, size);
+        if (is_internal_file(myfh->path))
+                return -ENOENT;
+
+        if (myfh)
+                res = ftruncate(myfh->fd_file, size);
         else
-                res = truncate(new_path, size);
+                res = truncate(myfh->path, size);
 
         if (res == -1)
                 return -errno;
@@ -641,8 +641,6 @@ static int xmp_write(const char *path, const char *buf, size_t size,
 
         char *disk_path = DISK_FILE;
         int fd_disk = open(disk_path, O_RDWR | O_APPEND);
-        uint64_t a = 0;
-        uint64_t *p_blocks_amount = &a;
 
         uint64_t version = update_version_counter(myfh->fd_vt);
         off_t vt_off = version * sizeof(uint64_t);
@@ -663,7 +661,6 @@ static int xmp_write(const char *path, const char *buf, size_t size,
         if (store_blocks(size, offset, fd_disk, myfh->fd_file, myfh->fd_vt, myfh->fd_vf, version) != 0)
                 return -errno;
 
-        //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
         close(fd_disk);
         return res;
 }
