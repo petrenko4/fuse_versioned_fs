@@ -3,8 +3,8 @@ mnt/*
 myfs
 run.sh
 test_sequence.sh
-disk
 tasklist
 versionview
 networks
 networks_fuse
+disk

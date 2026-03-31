@@ -345,6 +345,28 @@ static int xmp_rename(const char *from, const char *to, unsigned int flags)
         if (flags)
                 return -EINVAL;
 
+        
+        append_path(from, new_from);
+        append_path(to, new_to);
+
+        char version_file_from[PATH_MAX];
+        char version_table_from[PATH_MAX];
+        char version_file_to[PATH_MAX];
+        char version_table_to[PATH_MAX];
+
+        snprintf(version_file_from, sizeof(version_file_from), "%s.vf", new_from);
+        snprintf(version_table_from, sizeof(version_table_from), "%s.vt", new_from);
+        snprintf(version_file_to, sizeof(version_file_to), "%s.vf", new_to);
+        snprintf(version_table_to, sizeof(version_table_to), "%s.vt", new_to);
+
+        res = rename(version_file_from, version_file_to);
+        if(res == -1)
+                return errno;
+
+        res = rename(version_table_from, version_table_to);
+        if(res == -1)
+                return errno;
+                
         res = rename(new_from, new_to);
         if (res == -1)
                 return -errno;
