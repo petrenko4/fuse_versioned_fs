@@ -21,8 +21,8 @@ int open_internals(const char *file, struct my_file_handle *myfh)
 {
     strncpy(myfh->path, file, MAX_PATH_LEN - 1);
     myfh->path[MAX_PATH_LEN - 1] = '\0';
-    char version_file[MAX_PATH_LEN];
-    char version_table[MAX_PATH_LEN];
+    char version_file[MAX_PATH_LEN + 3];
+    char version_table[MAX_PATH_LEN + 3];
     char new_path[MAX_PATH_LEN];
     append_path(file, new_path);
 
@@ -129,6 +129,11 @@ int cmd_read(struct my_file_handle *myfh, uint64_t version)
     uint64_t next_version_off = vf_offset + 2 * sizeof(uint64_t) + ((size + BLOCK_SIZE - 1) / BLOCK_SIZE) * sizeof(uint64_t);
 
     vf_offset += 2 * sizeof(uint64_t);
+
+    char disk_file[MAX_PATH_LEN + 38];
+
+    snprintf(disk_file, sizeof(disk_file), "/workspaces/fuse_versioned_fs/fuse/%s.d", myfh->path);
+
     for (uint64_t i = vf_offset; i < next_version_off; i += sizeof(uint64_t))
     {
         uint64_t value = 0;
@@ -143,7 +148,7 @@ int cmd_read(struct my_file_handle *myfh, uint64_t version)
                                     : BLOCK_SIZE;
         if (!IS_VERSION(value))
         {
-            char *disk_path = DISK_FILE;
+            char *disk_path = disk_file;
             int fd_disk = open(disk_path, O_RDWR);
             if (pread(fd_disk, buffer, BLOCK_SIZE, value * BLOCK_SIZE) == -1)
                 return errno;
@@ -153,7 +158,7 @@ int cmd_read(struct my_file_handle *myfh, uint64_t version)
         else
         {
 
-            char *disk_path = DISK_FILE;
+            char *disk_path = disk_file;
             int fd_disk = open(disk_path, O_RDWR);
             uint64_t relevant_block = check_prev_version(myfh, version, ((i - vf_offset) / sizeof(uint64_t)));
             if (pread(fd_disk, buffer, BLOCK_SIZE, relevant_block * BLOCK_SIZE) == -1)

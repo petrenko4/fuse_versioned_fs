@@ -43,7 +43,6 @@ static void *xmp_init(struct fuse_conn_info *conn,
 
         char out[MAX_PATH_LEN];
         append_path("/", out);
-        fopen(DISK_FILE, "w+");
         // printf("[DEBUG] [myfs.c] xmp_init() called\n");
         printf("Versioned filesystem is mounted at %s\n", out);
 
@@ -345,7 +344,6 @@ static int xmp_rename(const char *from, const char *to, unsigned int flags)
         if (flags)
                 return -EINVAL;
 
-        
         append_path(from, new_from);
         append_path(to, new_to);
 
@@ -360,13 +358,13 @@ static int xmp_rename(const char *from, const char *to, unsigned int flags)
         snprintf(version_table_to, sizeof(version_table_to), "%s.vt", new_to);
 
         res = rename(version_file_from, version_file_to);
-        if(res == -1)
+        if (res == -1)
                 return errno;
 
         res = rename(version_table_from, version_table_to);
-        if(res == -1)
+        if (res == -1)
                 return errno;
-                
+
         res = rename(new_from, new_to);
         if (res == -1)
                 return -errno;
@@ -436,7 +434,7 @@ static int xmp_truncate(const char *path, off_t size,
 {
         int res;
         printf("[DEBUG] [myfs.c] xmp_truncate() called\n");
-        struct my_file_handle* myfh = (struct my_file_handle*)fi->fh;
+        struct my_file_handle *myfh = (struct my_file_handle *)fi->fh;
 
         if (is_internal_file(myfh->path))
                 return -ENOENT;
@@ -486,11 +484,13 @@ static int xmp_create(const char *path, mode_t mode, struct fuse_file_info *fi)
         if (fd == -1)
                 return -errno;
 
-        char version_file[MAX_PATH_LEN];
-        char version_table[MAX_PATH_LEN];
+        char version_file[MAX_PATH_LEN + 3];
+        char version_table[MAX_PATH_LEN + 3];
+        char disk_file[MAX_PATH_LEN + 2];
 
         snprintf(version_file, sizeof(version_file), "%s.vf", new_path);
         snprintf(version_table, sizeof(version_table), "%s.vt", new_path);
+        snprintf(disk_file, sizeof(disk_file), "%s.d", new_path);
 
         int fd_vf = open(version_file, O_CREAT | O_RDWR, 0644);
         if (fd_vf == -1)
@@ -498,10 +498,12 @@ static int xmp_create(const char *path, mode_t mode, struct fuse_file_info *fi)
 
         int fd_vt = open(version_table, O_CREAT | O_RDWR, 0644);
         if (fd_vt == -1)
-        {
-                close(fd_vt);
                 return -errno;
-        }
+
+        int fd_disk = open(disk_file, O_CREAT | O_RDWR | O_APPEND, 0644);
+        if (fd_disk == -1)
+                return -errno;
+
         vt_init(0, fd_vt);
         struct my_file_handle *h = malloc(sizeof(struct my_file_handle));
         if (!h)
@@ -509,6 +511,7 @@ static int xmp_create(const char *path, mode_t mode, struct fuse_file_info *fi)
         h->fd_file = fd;
         h->fd_vf = fd_vf;
         h->fd_vt = fd_vt;
+        h->fd_disk = fd_disk;
         strncpy(h->path, new_path, MAX_PATH_LEN - 1);
         h->path[MAX_PATH_LEN - 1] = '\0';
         fi->fh = (uint64_t)h;
@@ -523,11 +526,14 @@ static int xmp_open(const char *path, struct fuse_file_info *fi)
         char new_path[MAX_PATH_LEN];
         append_path(path, new_path);
         printf("[DEBUG] [myfs.c] xmp_open() called\n");
-        char version_file[PATH_MAX];
-        char version_table[PATH_MAX];
+
+        char version_file[PATH_MAX + 3];
+        char version_table[PATH_MAX + 3];
+        char disk_file[PATH_MAX + 2];
 
         snprintf(version_file, sizeof(version_file), "%s.vf", new_path);
         snprintf(version_table, sizeof(version_table), "%s.vt", new_path);
+        snprintf(disk_file, sizeof(disk_file), "%s.d", new_path);
 
         int fd_vf = open(version_file, O_CREAT | O_RDWR, 0644);
         if (fd_vf == -1)
@@ -535,13 +541,13 @@ static int xmp_open(const char *path, struct fuse_file_info *fi)
 
         int fd_vt = open(version_table, O_CREAT | O_RDWR, 0644);
         if (fd_vt == -1)
-        {
-                close(fd_vt);
                 return -errno;
-        }
         /* Enable direct_io when open has flags O_DIRECT to enjoy the feature
            parallel_direct_writes (i.e., to get a shared lock, not exclusive lock,
            for writes to the same file). */
+        int fd_disk = open(disk_file, O_RDWR | O_APPEND, 0644);
+        if (fd_disk == -1)
+                return -errno;
         if (fi->flags & O_DIRECT)
         {
                 fi->direct_io = 1;
@@ -552,6 +558,7 @@ static int xmp_open(const char *path, struct fuse_file_info *fi)
                 return -ENOMEM;
         h->fd_vf = fd_vf;
         h->fd_vt = fd_vt;
+        h->fd_disk = fd_disk;
         strncpy(h->path, new_path, MAX_PATH_LEN - 1);
         h->path[MAX_PATH_LEN - 1] = '\0';
         fi->fh = (uint64_t)h;
@@ -639,9 +646,6 @@ static int xmp_write(const char *path, const char *buf, size_t size,
                 return -ENOENT;
         int res;
 
-        char *disk_path = DISK_FILE;
-        int fd_disk = open(disk_path, O_RDWR | O_APPEND);
-
         uint64_t version = update_version_counter(myfh->fd_vt);
         off_t vt_off = version * sizeof(uint64_t);
 
@@ -658,10 +662,9 @@ static int xmp_write(const char *path, const char *buf, size_t size,
         if (res == -1)
                 res = -errno;
 
-        if (store_blocks(size, offset, fd_disk, myfh->fd_file, myfh->fd_vt, myfh->fd_vf, version) != 0)
+        if (store_blocks(size, offset, myfh->fd_disk, myfh->fd_file, myfh->fd_vt, myfh->fd_vf, version) != 0)
                 return -errno;
 
-        close(fd_disk);
         return res;
 }
 
@@ -729,6 +732,8 @@ static int xmp_release(const char *path, struct fuse_file_info *fi)
                 close(myfh->fd_vf);
         if (myfh->fd_vt)
                 close(myfh->fd_vt);
+        if (myfh->fd_disk)
+                close(myfh->fd_disk);
         free(myfh);
         return 0;
 }
