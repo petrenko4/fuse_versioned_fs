@@ -98,8 +98,12 @@ int cmd_list(struct my_file_handle *myfh)
 }
 
 // traverse previous versions untill pointer to disk found
-uint64_t check_prev_version(struct my_file_handle *myfh, uint64_t version, uint64_t block_number)
+uint64_t check_version(struct my_file_handle *myfh, uint64_t version, uint64_t version_max, uint64_t block_number)
 {
+
+    if (version > version_max)
+        return -1;
+
     uint64_t vf_off = 0;
     if (pread(myfh->fd_vt, &vf_off, sizeof(vf_off), version * sizeof(uint64_t)) == -1)
         return errno;
@@ -111,7 +115,12 @@ uint64_t check_prev_version(struct my_file_handle *myfh, uint64_t version, uint6
     if (!IS_VERSION(value))
         return value;
 
-    return check_prev_version(myfh, GET_VALUE(value), block_number);
+    uint64_t res = check_version(myfh, GET_VALUE(value), version_max, block_number);
+
+    // if (pwrite(myfh->fd_vf, &res, sizeof(value), vf_off + 2 * sizeof(uint64_t) + block_number * sizeof(uint64_t)) == -1)
+    //     return errno;
+
+    return res;
 }
 
 int cmd_read(struct my_file_handle *myfh, uint64_t version)
@@ -119,6 +128,9 @@ int cmd_read(struct my_file_handle *myfh, uint64_t version)
     uint64_t buffer[BLOCK_SIZE / sizeof(uint64_t)];
     uint64_t vf_offset = 0;
     if (pread(myfh->fd_vt, &vf_offset, sizeof(vf_offset), version * sizeof(uint64_t)) == -1)
+        return errno;
+    uint64_t version_max = 0;
+    if (pread(myfh->fd_vt, &version_max, sizeof(uint64_t), 0) == -1)
         return errno;
 
     uint64_t size = 0;
@@ -150,9 +162,9 @@ int cmd_read(struct my_file_handle *myfh, uint64_t version)
         {
             char *disk_path = disk_file;
             int fd_disk = open(disk_path, O_RDWR);
-            if (pread(fd_disk, buffer, BLOCK_SIZE, value * BLOCK_SIZE) == -1)
+            if (pread(fd_disk, &buffer, BLOCK_SIZE, value * BLOCK_SIZE) == -1)
                 return errno;
-            if (write(STDOUT_FILENO, buffer, bytes_to_write) == -1)
+            if (write(STDOUT_FILENO, &buffer, bytes_to_write) == -1)
                 return errno;
         }
         else
@@ -160,14 +172,24 @@ int cmd_read(struct my_file_handle *myfh, uint64_t version)
 
             char *disk_path = disk_file;
             int fd_disk = open(disk_path, O_RDWR);
-            uint64_t relevant_block = check_prev_version(myfh, version, ((i - vf_offset) / sizeof(uint64_t)));
-            if (pread(fd_disk, buffer, BLOCK_SIZE, relevant_block * BLOCK_SIZE) == -1)
-                return errno;
+            uint64_t relevant_block = check_version(myfh, version, version_max,((i - vf_offset) / sizeof(uint64_t)));
+            if (relevant_block == -1)
+            {
+                if (pread(myfh->fd_file, &buffer, BLOCK_SIZE, ((i - vf_offset)/sizeof(uint64_t))*BLOCK_SIZE) == -1)
+                    return errno;
+                if (write(STDOUT_FILENO, &buffer, bytes_to_write) == -1)
+                    return errno;
+            }
+            else
+            {
+                if (pread(fd_disk, &buffer, BLOCK_SIZE, relevant_block * BLOCK_SIZE) == -1)
+                    return errno;
 
-            if (write(STDOUT_FILENO, buffer, bytes_to_write) == -1)
-                return errno;
-            if(pwrite(myfh->fd_vf, &relevant_block, sizeof(relevant_block), i) == -1) 
-                return errno;
+                if (write(STDOUT_FILENO, &buffer, bytes_to_write) == -1)
+                    return errno;
+            }
+            // if(pwrite(myfh->fd_vf, &relevant_block, sizeof(relevant_block), i) == -1)
+            //     return errno;
         }
     }
 

@@ -57,11 +57,13 @@ int store_blocks(size_t write_size, off_t offset, int fd_disk, int fd_file, int 
     uint64_t write_start = offset / BLOCK_SIZE;
     uint64_t write_end = (offset + write_size - 1) / BLOCK_SIZE;
 
-    if (write_start >= file_num_blocks)
-        return -EINVAL;
+    // if (write_start >= file_num_blocks)
+    //     return -EINVAL;
 
     uint64_t clamp_end = write_end < file_num_blocks - 1 ? write_end : file_num_blocks - 1;
-    uint64_t count = clamp_end - write_start + 1;
+    uint64_t count = (file_num_blocks == 0 || write_start >= file_num_blocks)
+                         ? 0
+                         : clamp_end - write_start + 1;
 
     // write file size to vf
     if (lseek(fd_vf, 0, SEEK_END) == -1)
@@ -69,7 +71,7 @@ int store_blocks(size_t write_size, off_t offset, int fd_disk, int fd_file, int 
     if (write(fd_vf, &file_size, sizeof(file_size)) != sizeof(file_size))
         return -errno;
 
-    uint64_t value = version - 1;
+    uint64_t value = version + 1;
     assert(value == GET_VALUE(value));
     value = MAKE_VERSION(value);
 

@@ -5,6 +5,6 @@ run.sh
 test_sequence.sh
 tasklist
 versionview
-networks
-networks_fuse
+networks*
 disk
+test*
