@@ -45,6 +45,77 @@
 //     }
 //     return 0;
 // }
+// int store_blocks(size_t write_size, off_t offset, int fd_disk, int fd_file, int fd_vt, int fd_vf, uint64_t version)
+// {
+//     struct stat st;
+//     if (fstat(fd_file, &st) == -1)
+//         return -errno;
+//     off_t file_size = st.st_size;
+
+//     // compute affected blocks right here, single source of truth
+//     uint64_t file_num_blocks = (file_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
+//     uint64_t write_start = offset / BLOCK_SIZE;
+//     uint64_t write_end = (offset + write_size - 1) / BLOCK_SIZE;
+
+//     // if (write_start >= file_num_blocks)
+//     //     return -EINVAL;
+
+//     uint64_t clamp_end = write_end < file_num_blocks - 1 ? write_end : file_num_blocks - 1;
+//     uint64_t count = (file_num_blocks == 0 || write_start >= file_num_blocks)
+//                          ? 0
+//                          : clamp_end - write_start + 1;
+
+//     // write file size to vf
+//     if (lseek(fd_vf, 0, SEEK_END) == -1)
+//         return -errno;
+//     if (write(fd_vf, &file_size, sizeof(file_size)) != sizeof(file_size))
+//         return -errno;
+
+//     uint64_t value = version + 1;
+//     assert(value == GET_VALUE(value));
+//     value = MAKE_VERSION(value);
+
+//     // version markers for blocks before the affected range
+//     for (uint64_t i = 0; i < write_start; i++)
+//     {
+//         if (lseek(fd_vf, 0, SEEK_END) == -1)
+//             return -errno;
+//         if (write(fd_vf, &value, sizeof(value)) != sizeof(value))
+//             return -errno;
+//     }
+
+//     // copy each affected block to disk and record its position in vf
+//     for (uint64_t i = 0; i < count; i++)
+//     {
+//         uint64_t block = write_start + i;
+//         char buffer[BLOCK_SIZE] = {'\0'};
+
+//         if (lseek(fd_file, block * BLOCK_SIZE, SEEK_SET) == -1)
+//             return -errno;
+//         if (read(fd_file, buffer, sizeof(buffer)) == -1)
+//             return -errno;
+//         if (lseek(fd_disk, 0, SEEK_END) == -1)
+//             return -errno;
+//         if (write(fd_disk, buffer, sizeof(buffer)) != sizeof(buffer))
+//             return -errno;
+
+//         uint64_t whence_disk = (lseek(fd_disk, 0, SEEK_END) / BLOCK_SIZE) - 1;
+
+//         if (lseek(fd_vf, 0, SEEK_END) == -1)
+//             return -errno;
+//         if (write(fd_vf, &whence_disk, sizeof(whence_disk)) != sizeof(whence_disk))
+//             return -errno;
+//     }
+
+//     for (uint64_t i = clamp_end + 1; i < file_num_blocks; i++)
+//     {
+//         if (lseek(fd_vf, 0, SEEK_END) == -1)
+//             return -errno;
+//         if (write(fd_vf, &value, sizeof(value)) != sizeof(value))
+//             return -errno;
+//     }
+//     return 0;
+// }
 int store_blocks(size_t write_size, off_t offset, int fd_disk, int fd_file, int fd_vt, int fd_vf, uint64_t version)
 {
     struct stat st;
@@ -52,68 +123,64 @@ int store_blocks(size_t write_size, off_t offset, int fd_disk, int fd_file, int 
         return -errno;
     off_t file_size = st.st_size;
 
-    // compute affected blocks right here, single source of truth
     uint64_t file_num_blocks = (file_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
     uint64_t write_start = offset / BLOCK_SIZE;
-    uint64_t write_end = (offset + write_size - 1) / BLOCK_SIZE;
+    uint64_t write_end   = (offset + write_size - 1) / BLOCK_SIZE;
+    uint64_t clamp_end   = write_end < file_num_blocks - 1 ? write_end : file_num_blocks - 1;
+    uint64_t count       = (file_num_blocks == 0 || write_start >= file_num_blocks)
+                           ? 0 : clamp_end - write_start + 1;
 
-    // if (write_start >= file_num_blocks)
-    //     return -EINVAL;
-
-    uint64_t clamp_end = write_end < file_num_blocks - 1 ? write_end : file_num_blocks - 1;
-    uint64_t count = (file_num_blocks == 0 || write_start >= file_num_blocks)
-                         ? 0
-                         : clamp_end - write_start + 1;
-
-    // write file size to vf
-    if (lseek(fd_vf, 0, SEEK_END) == -1)
+    off_t vf_pos   = lseek(fd_vf, 0, SEEK_END);
+    off_t disk_pos = lseek(fd_disk, 0, SEEK_END);
+    if (vf_pos == -1 || disk_pos == -1)
         return -errno;
-    if (write(fd_vf, &file_size, sizeof(file_size)) != sizeof(file_size))
-        return -errno;
+
+    uint64_t total_entries = 1 + file_num_blocks; 
+    uint64_t *vf_buf = malloc(total_entries * sizeof(uint64_t));
+    if (!vf_buf)
+        return -ENOMEM;
 
     uint64_t value = version + 1;
     assert(value == GET_VALUE(value));
     value = MAKE_VERSION(value);
 
-    // version markers for blocks before the affected range
-    for (uint64_t i = 0; i < write_start; i++)
-    {
-        if (lseek(fd_vf, 0, SEEK_END) == -1)
-            return -errno;
-        if (write(fd_vf, &value, sizeof(value)) != sizeof(value))
-            return -errno;
-    }
+    vf_buf[0] = (uint64_t)file_size;
 
-    // copy each affected block to disk and record its position in vf
+    for (uint64_t i = 0; i < write_start; i++)
+        vf_buf[1 + i] = value;
+
+    char buffer[BLOCK_SIZE];
     for (uint64_t i = 0; i < count; i++)
     {
         uint64_t block = write_start + i;
-        char buffer[BLOCK_SIZE] = {'\0'};
+        memset(buffer, 0, sizeof(buffer));
 
-        if (lseek(fd_file, block * BLOCK_SIZE, SEEK_SET) == -1)
+        if (pread(fd_file, buffer, BLOCK_SIZE, block * BLOCK_SIZE) == -1)
+        {
+            free(vf_buf);
             return -errno;
-        if (read(fd_file, buffer, sizeof(buffer)) == -1)
+        }
+        if (write(fd_disk, buffer, BLOCK_SIZE) != BLOCK_SIZE)
+        {
+            free(vf_buf);
             return -errno;
-        if (lseek(fd_disk, 0, SEEK_END) == -1)
-            return -errno;
-        if (write(fd_disk, buffer, sizeof(buffer)) != sizeof(buffer))
-            return -errno;
+        }
 
-        uint64_t whence_disk = (lseek(fd_disk, 0, SEEK_END) / BLOCK_SIZE) - 1;
-
-        if (lseek(fd_vf, 0, SEEK_END) == -1)
-            return -errno;
-        if (write(fd_vf, &whence_disk, sizeof(whence_disk)) != sizeof(whence_disk))
-            return -errno;
+        uint64_t whence_disk = disk_pos / BLOCK_SIZE;
+        disk_pos += BLOCK_SIZE;
+        vf_buf[1 + write_start + i] = whence_disk;
     }
 
     for (uint64_t i = clamp_end + 1; i < file_num_blocks; i++)
+        vf_buf[1 + i] = value;
+
+    if (write(fd_vf, vf_buf, total_entries * sizeof(uint64_t)) != (ssize_t)(total_entries * sizeof(uint64_t)))
     {
-        if (lseek(fd_vf, 0, SEEK_END) == -1)
-            return -errno;
-        if (write(fd_vf, &value, sizeof(value)) != sizeof(value))
-            return -errno;
+        free(vf_buf);
+        return -errno;
     }
+
+    free(vf_buf);
     return 0;
 }
 // int store_blocks(uint64_t *blocks, uint64_t count, int fd_disk, int fd_file, int fd_vt, int fd_vf, uint64_t version)

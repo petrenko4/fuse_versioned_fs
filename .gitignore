@@ -8,3 +8,5 @@ versionview
 networks*
 disk
 test*
+mnt_passthrough/*
+passthrough*
