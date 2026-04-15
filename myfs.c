@@ -580,9 +580,9 @@ static int xmp_open(const char *path, struct fuse_file_info *fi)
                 if (pwrite(h->fd_vt, &offset_for_vf, sizeof(offset_for_vf), vt_off) != sizeof(offset_for_vf))
                         return -errno;
 
-                // write version number to the version file
-                if (write(h->fd_vf, &version, sizeof(version)) != sizeof(version))
-                        return -errno;
+                // // write version number to the version file
+                // if (write(h->fd_vf, &version, sizeof(version)) != sizeof(version))
+                //         return -errno;
 
                 if (store_blocks(file_size, 0, h->fd_disk, fd_file, h->fd_vt, h->fd_vf, version) == -1)
                         return -errno;
@@ -667,9 +667,9 @@ static int xmp_write(const char *path, const char *buf, size_t size,
                 if (pwrite(myfh->fd_vt, &offset_for_vf, sizeof(offset_for_vf), vt_off) != sizeof(offset_for_vf))
                         return -errno;
 
-                // write version number to the version file
-                if (write(myfh->fd_vf, &version, sizeof(version)) != sizeof(version))
-                        return -errno;
+                // // write version number to the version file
+                // if (write(myfh->fd_vf, &version, sizeof(version)) != sizeof(version))
+                //         return -errno;
 
                 if (store_blocks(size, offset, myfh->fd_disk, myfh->fd_file, myfh->fd_vt, myfh->fd_vf, version) != 0)
                         return -errno;

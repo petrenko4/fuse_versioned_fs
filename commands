@@ -9,3 +9,6 @@ build command:
 
 example usage:
     ./myfs mnt/
+
+test:
+  fio --name=test --rw=write --bs=4k --size=100m --directory=mnt/
