@@ -112,10 +112,10 @@ uint64_t check_version(struct my_file_handle *myfh, uint64_t version, uint64_t v
     if (pread(myfh->fd_vf, &value, sizeof(value), vf_off + 2 * sizeof(uint64_t) + block_number * sizeof(uint64_t)) == -1)
         return errno;
 
-    if (!IS_VERSION(value))
+    if (value)
         return value;
 
-    uint64_t res = check_version(myfh, GET_VALUE(value), version_max, block_number);
+    uint64_t res = check_version(myfh, version + 1, version_max, block_number);
 
     // if (pwrite(myfh->fd_vf, &res, sizeof(value), vf_off + 2 * sizeof(uint64_t) + block_number * sizeof(uint64_t)) == -1)
     //     return errno;
@@ -144,7 +144,10 @@ int cmd_read(struct my_file_handle *myfh, uint64_t version)
 
     char disk_file[MAX_PATH_LEN + 38];
 
-    snprintf(disk_file, sizeof(disk_file), "/workspaces/fuse_versioned_fs/fuse/%s.d", myfh->path);
+    snprintf(disk_file, sizeof(disk_file), "%s%s.d", BASE_PATH, myfh->path);
+
+    char *disk_path = disk_file;
+    int fd_disk = open(disk_path, O_RDWR);
 
     for (uint64_t i = vf_offset; i < next_version_off; i += sizeof(uint64_t))
     {
@@ -158,7 +161,7 @@ int cmd_read(struct my_file_handle *myfh, uint64_t version)
         size_t bytes_to_write = (is_last && size % BLOCK_SIZE != 0)
                                     ? size % BLOCK_SIZE
                                     : BLOCK_SIZE;
-        if (!IS_VERSION(value))
+        if (value)
         {
             char *disk_path = disk_file;
             int fd_disk = open(disk_path, O_RDWR);
@@ -170,12 +173,10 @@ int cmd_read(struct my_file_handle *myfh, uint64_t version)
         else
         {
 
-            char *disk_path = disk_file;
-            int fd_disk = open(disk_path, O_RDWR);
-            uint64_t relevant_block = check_version(myfh, version, version_max,((i - vf_offset) / sizeof(uint64_t)));
+            uint64_t relevant_block = check_version(myfh, version, version_max, ((i - vf_offset) / sizeof(uint64_t)));
             if (relevant_block == -1)
             {
-                if (pread(myfh->fd_file, &buffer, BLOCK_SIZE, ((i - vf_offset)/sizeof(uint64_t))*BLOCK_SIZE) == -1)
+                if (pread(myfh->fd_file, &buffer, BLOCK_SIZE, ((i - vf_offset) / sizeof(uint64_t)) * BLOCK_SIZE) == -1)
                     return errno;
                 if (write(STDOUT_FILENO, &buffer, bytes_to_write) == -1)
                     return errno;

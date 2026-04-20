@@ -503,7 +503,8 @@ static int xmp_create(const char *path, mode_t mode, struct fuse_file_info *fi)
         int fd_disk = open(disk_file, O_CREAT | O_RDWR | O_APPEND, 0644);
         if (fd_disk == -1)
                 return -errno;
-
+        if(ftruncate(fd_disk, BLOCK_SIZE) == -1)
+                return -errno;
         vt_init(0, fd_vt);
         struct my_file_handle *h = malloc(sizeof(struct my_file_handle));
         if (!h)
@@ -565,10 +566,10 @@ static int xmp_open(const char *path, struct fuse_file_info *fi)
         if (fi->flags & O_TRUNC)
         {
                 int fd_file = open(new_path, O_RDWR, 0644);
-                if(fd_file == -1)
+                if (fd_file == -1)
                         return -errno;
                 struct stat sb;
-                if(fstat(fd_file, &sb) == -1)
+                if (fstat(fd_file, &sb) == -1)
                         return -errno;
                 uint64_t file_size = sb.st_size;
 
@@ -581,10 +582,13 @@ static int xmp_open(const char *path, struct fuse_file_info *fi)
                         return -errno;
 
                 // write version number to the version file
-                if (write(h->fd_vf, &version, sizeof(version)) != sizeof(version))
+                if (pwrite(h->fd_vf, &version, sizeof(version), offset_for_vf) != sizeof(version))
                         return -errno;
-
-                if (store_blocks(file_size, 0, h->fd_disk, fd_file, h->fd_vt, h->fd_vf, version) == -1)
+                offset_for_vf += sizeof(uint64_t);
+                if (pwrite(h->fd_vf, &file_size, sizeof(version), offset_for_vf) != sizeof(version))
+                        return -errno;
+                        
+                if (store_blocks(file_size, 0, h->fd_disk, fd_file, h->fd_vt, h->fd_vf, version) != 0)
                         return -errno;
                 close(fd_file);
         }
@@ -668,7 +672,10 @@ static int xmp_write(const char *path, const char *buf, size_t size,
                         return -errno;
 
                 // write version number to the version file
-                if (write(myfh->fd_vf, &version, sizeof(version)) != sizeof(version))
+                if (pwrite(myfh->fd_vf, &version, sizeof(version), offset_for_vf) != sizeof(version))
+                        return -errno;
+                offset_for_vf += sizeof(uint64_t);
+                if (pwrite(myfh->fd_vf, &file_size, sizeof(version), offset_for_vf) != sizeof(version))
                         return -errno;
 
                 if (store_blocks(size, offset, myfh->fd_disk, myfh->fd_file, myfh->fd_vt, myfh->fd_vf, version) != 0)
