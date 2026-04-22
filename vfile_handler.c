@@ -189,48 +189,62 @@ int store_blocks(size_t write_size, off_t offset, int fd_disk, int fd_file, int 
     struct stat st;
     if (fstat(fd_file, &st) == -1)
         return -errno;
+
     off_t file_size = st.st_size;
 
-    uint64_t file_num_blocks = (file_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
-    uint64_t write_start = offset / BLOCK_SIZE;
-    uint64_t write_end   = (offset + write_size - 1) / BLOCK_SIZE;
-    uint64_t clamp_end   = write_end < file_num_blocks - 1 ? write_end : file_num_blocks - 1;
-    uint64_t count       = (file_num_blocks == 0 || write_start >= file_num_blocks)
-                           ? 0 : clamp_end - write_start + 1;
+    uint64_t affected_interval_left = offset / BLOCK_SIZE;
 
-    off_t vf_version_offset = lseek(fd_vf, 0, SEEK_END);
-    off_t disk_pos          = lseek(fd_disk, 0, SEEK_END);
-    if (vf_version_offset == -1 || disk_pos == -1)
+    uint64_t affected_interval_right = (file_size - 1 < (offset + write_size) - 1)
+                                           ? ((file_size - 1 + BLOCK_SIZE - 1) / BLOCK_SIZE)
+                                           : (((offset + write_size) - 1 + BLOCK_SIZE - 1) / BLOCK_SIZE);
+
+    off_t disk_pos = lseek(fd_disk, 0, SEEK_END);
+    if (disk_pos == -1)
         return -errno;
 
-    // write timestamp
-    uint64_t ts = (uint64_t)time(NULL);
-    if (pwrite(fd_vf, &ts, sizeof(ts), vf_version_offset) == -1)
-        return -errno;
-
-    // write file size
-    uint64_t fs = (uint64_t)file_size;
-    if (pwrite(fd_vf, &fs, sizeof(fs), vf_version_offset + sizeof(uint64_t)) == -1)
-        return -errno;
-
-    // write only affected blocks, everything else stays as hole (zero)
     char buffer[BLOCK_SIZE];
-    for (uint64_t i = 0; i < count; i++)
-    {
-        uint64_t block = write_start + i;
-        memset(buffer, 0, sizeof(buffer));
 
-        if (pread(fd_file, buffer, BLOCK_SIZE, block * BLOCK_SIZE) == -1)
+    uint64_t vf_offset;
+    if (pread(fd_vt, &vf_offset, sizeof(vf_offset), version * sizeof(uint64_t)) == -1)
+        return -errno;
+
+    if(pwrite(fd_vf, &file_size, sizeof(file_size), vf_offset + sizeof(uint64_t)) == -1)
+        return -errno;
+
+    vf_offset += 2 * sizeof(uint64_t); // skip version number(ts) and version size
+
+    for(uint64_t i = 0; i < affected_interval_left; i++)
+    {
+        uint64_t value = MAKE_VERSION(version);
+        if(pwrite(fd_vf, &value, sizeof(value), vf_offset + i * sizeof(uint64_t)) == -1)
             return -errno;
+        
+    }
+
+    for (uint64_t i = affected_interval_left; i < affected_interval_right; i++)
+    {
+        if (pread(fd_file, buffer, BLOCK_SIZE, i * BLOCK_SIZE) == -1)
+            return -errno;
+
         if (write(fd_disk, buffer, BLOCK_SIZE) != BLOCK_SIZE)
             return -errno;
 
-        uint64_t whence_disk = (disk_pos / BLOCK_SIZE) + 1; // +1 so 0 means hole
+        uint64_t disk_block_id = disk_pos / BLOCK_SIZE;
         disk_pos += BLOCK_SIZE;
 
-        off_t entry_offset = vf_version_offset + 2 * sizeof(uint64_t) + block * sizeof(uint64_t);
-        if (pwrite(fd_vf, &whence_disk, sizeof(whence_disk), entry_offset) == -1)
+        if (pwrite(fd_vf, &disk_block_id, sizeof(disk_block_id), vf_offset + (i * sizeof (uint64_t))) == -1)
             return -errno;
+    }
+
+    uint64_t vf_end = (file_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
+
+    for(uint64_t i = affected_interval_right; i < vf_end; i++)
+    {
+
+        uint64_t value = MAKE_VERSION(version);
+        if(pwrite(fd_vf, &value, sizeof(value), vf_offset + i * sizeof(uint64_t)) == -1)
+            return -errno;
+        
     }
 
     return 0;
