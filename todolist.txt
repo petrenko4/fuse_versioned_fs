@@ -1,3 +1,0 @@
-static int xmp_getattr(const char *path, struct stat *stbuf,
-                       struct fuse_file_info *fi)
-                    

@@ -69,25 +69,95 @@ static void *xmp_init(struct fuse_conn_info *conn,
 static int xmp_getattr(const char *path, struct stat *stbuf,
                        struct fuse_file_info *fi)
 {
-        int res;
-
-        if (is_internal_file(path))
-                return -ENOENT;
+        char *actual_path;
         if (fi)
         {
                 struct my_file_handle *myfh = (struct my_file_handle *)fi->fh;
-                res = fstat(myfh->fd_file, stbuf);
+                actual_path = myfh->path;
         }
         else
         {
-                const char *rel_path = (path[0] == '/') ? path + 1 : path;
+                actual_path = strdup(path);
+                if (!actual_path)
+                        return -ENOMEM;
+        }
+        int res;
+        int is_vls = 0;
 
-                if (rel_path[0] == '\0')
-                        rel_path = ".";
+        char *ext = strrchr(actual_path, '.');
+        if (ext && strcmp(ext, ".vls") == 0)
+        {
+                *ext = '\0';
+                is_vls = 1;
+        }
+        if (is_internal_file(path))
+                return -ENOENT;
+        if (strstr(actual_path, ".vls/"))
+        {
+                const char *rel_ptr = (actual_path[0] == '/') ? actual_path + 1 : actual_path;
+                char base_path[PATH_MAX];
+                strncpy(base_path, rel_ptr, sizeof(base_path) - 1);
+                base_path[sizeof(base_path) - 1] = '\0';
 
-                // printf("[DEBUG] [myfs.c] xmp_getattr() called for: %s\n", rel_path);
+                char *vls_ptr = strstr(base_path, ".vls/");
+                *vls_ptr = '\0';
 
-                res = fstatat(root_fd, rel_path, stbuf, AT_SYMLINK_NOFOLLOW);
+                if (fstatat(root_fd, base_path, stbuf, AT_SYMLINK_NOFOLLOW) == -1)
+                        return -errno;
+
+                stbuf->st_mode = S_IFREG | (stbuf->st_mode & 0777);
+
+                char *at_sign = strrchr(path, '@');
+                if (at_sign)
+                {
+                        uint64_t index = strtoull(at_sign + 1, NULL, 10);
+                        char vt_name[PATH_MAX];
+                        snprintf(vt_name, sizeof(vt_name), "%s.vt", base_path);
+                        char vf_name[PATH_MAX];
+                        snprintf(vf_name, sizeof(vf_name), "%s.vf", base_path);
+                        int fd_vt = openat(root_fd, vt_name, O_RDONLY);
+                        if (fd_vt == -1)
+                                return -errno;
+                        int fd_vf = openat(root_fd, vf_name, O_RDONLY);
+                        if (fd_vf == -1)
+                                return -errno;
+                        uint64_t vf_offset;
+                        if (pread(fd_vt, &vf_offset, sizeof(vf_offset), index * sizeof(uint64_t)) == -1)
+                                return -errno;
+                        uint64_t version_size;
+                        if (pread(fd_vf, &version_size, sizeof(version_size), vf_offset + 1 * sizeof(uint64_t)) == -1)
+                                return -errno;
+                        stbuf->st_size = version_size;
+                        stbuf->st_blocks = (version_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
+                }
+
+                return 0;
+        }
+        if (is_vls)
+        {
+                stbuf->st_mode = (stbuf->st_mode & ~S_IFREG) | S_IFDIR;
+                stbuf->st_mode |= 0555; // Give it read/execute permissions
+                stbuf->st_nlink = 2;    // Directories need 2 links
+                res = 0;
+        }
+        else
+        {
+                if (fi)
+                {
+                        struct my_file_handle *myfh = (struct my_file_handle *)fi->fh;
+                        res = fstat(myfh->fd_file, stbuf);
+                }
+                else
+                {
+                        const char *rel_path = (path[0] == '/') ? path + 1 : path;
+
+                        if (rel_path[0] == '\0')
+                                rel_path = ".";
+
+                        // printf("[DEBUG] [myfs.c] xmp_getattr() called for: %s\n", rel_path);
+
+                        res = fstatat(root_fd, rel_path, stbuf, AT_SYMLINK_NOFOLLOW);
+                }
         }
 
         if (res == -1)
@@ -137,6 +207,8 @@ struct xmp_dirp
         DIR *dp;
         struct dirent *entry;
         off_t offset;
+        int is_virtual;
+        char path[PATH_MAX];
 };
 
 static int xmp_opendir(const char *path, struct fuse_file_info *fi)
@@ -144,9 +216,29 @@ static int xmp_opendir(const char *path, struct fuse_file_info *fi)
         if (is_internal_file(path))
                 return -ENOENT;
         int res;
+        if (strstr(path, ".vls"))
+        {
+                struct xmp_dirp *d = malloc(sizeof(struct xmp_dirp));
+                if (!d)
+                        return -ENOMEM;
+
+                d->dp = NULL;
+                d->is_virtual = 1;
+                d->offset = 0;
+                d->entry = NULL;
+                strncpy(d->path, path, PATH_MAX - 1);
+                d->path[PATH_MAX - 1] = '\0';
+
+                fi->fh = (uintptr_t)d;
+
+                return 0;
+        }
         struct xmp_dirp *d = malloc(sizeof(struct xmp_dirp));
         if (d == NULL)
                 return -ENOMEM;
+
+        strncpy(d->path, path, PATH_MAX - 1);
+        d->path[PATH_MAX - 1] = '\0';
 
         const char *rel_path = (path[0] == '/') ? path + 1 : path;
         if (rel_path[0] == '\0')
@@ -164,7 +256,7 @@ static int xmp_opendir(const char *path, struct fuse_file_info *fi)
         }
         d->offset = 0;
         d->entry = NULL;
-
+        d->is_virtual = 0;
         fi->fh = (unsigned long)d;
         return 0;
 }
@@ -179,6 +271,64 @@ static int xmp_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
                        enum fuse_readdir_flags flags)
 {
         struct xmp_dirp *d = get_dirp(fi);
+
+        if (d->is_virtual)
+        {
+                const char *my_path = d->path;
+                const char *rel_path = (my_path[0] == '/') ? my_path + 1 : my_path;
+
+                char base_path[PATH_MAX];
+                strncpy(base_path, rel_path, sizeof(base_path) - 1);
+                base_path[sizeof(base_path) - 1] = '\0';
+
+                char *ext = strstr(base_path, ".vls");
+                if (ext)
+                        *ext = '\0';
+
+                char vt_name[PATH_MAX];
+                snprintf(vt_name, sizeof(vt_name), "%s.vt", base_path);
+                char vf_name[PATH_MAX];
+                snprintf(vf_name, sizeof(vf_name), "%s.vf", base_path);
+                int fd_vt = openat(root_fd, vt_name, O_RDONLY);
+                if (fd_vt == -1)
+                        return -errno;
+                int fd_vf = openat(root_fd, vf_name, O_RDONLY);
+                if (fd_vf == -1)
+                        return -errno;
+                uint64_t version_count;
+                if (pread(fd_vt, &version_count, sizeof(version_count), 0) == -1)
+                {
+                        close(fd_vt);
+                        close(fd_vf);
+                        return -errno;
+                }
+                for (uint64_t i = 0; i < version_count; i++)
+                {
+                        uint64_t version_number;
+                        if (pread(fd_vf, &version_number, sizeof(version_number), i * sizeof(uint64_t)) == -1)
+                        {
+                                close(fd_vt);
+                                close(fd_vf);
+                                return -errno;
+                        }
+                        const char *filename = strrchr(base_path, '/');
+
+                        if (filename)
+                        {
+                                filename++;
+                        }
+                        else
+                        {
+                                filename = base_path;
+                        }
+                        char v_name[NAME_MAX];
+                        snprintf(v_name, sizeof(v_name), "%s@%lu@%lu",
+                                 filename, version_number, i + 1);
+
+                        filler(buf, v_name, NULL, 0, 0);
+                }
+                return 0;
+        }
 
         // printf("[DEBUG] [myfs.c] xmp_readdir() called\n");
         if (offset != d->offset)
@@ -241,7 +391,7 @@ static int xmp_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
                         break;
                 if (S_ISREG(st.st_mode))
                 {
-                        char vls_dir[NAME_MAX];
+                        char vls_dir[NAME_MAX + 5];
                         snprintf(vls_dir, sizeof(vls_dir), "%s.vls", d->entry->d_name);
 
                         // Modify the stat struct for the virtual directory
