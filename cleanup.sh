@@ -1,1 +1,1 @@
-rm -r fuse/* 
+rm -r mnt/* 
