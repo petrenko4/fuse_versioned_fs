@@ -115,9 +115,9 @@ int read_version(size_t read_size, off_t offset, char *buf, uint64_t version, in
         int is_one = 0;
         int is_first = 0;
         int is_last = 0;
-        if ((affected_interval_left - affected_interval_right) == 1)
+        if ((affected_interval_right - affected_interval_left) == 1)
         {
-            to_read = read_size;
+            to_read = file_size;
             is_one = 1;
         }
         else if (i == affected_interval_left)
@@ -127,11 +127,13 @@ int read_version(size_t read_size, off_t offset, char *buf, uint64_t version, in
         }
         else if (i == affected_interval_right - 1)
         {
-            to_read = (offset + read_size) % BLOCK_SIZE;
+            to_read = (offset + file_size) % BLOCK_SIZE;
+            if(to_read == 0)
+                to_read = BLOCK_SIZE;
             is_last = 1;
         }
         uint64_t value;
-        if (pread(fd_vf, &value, sizeof(value), vf_offset) == -1)
+        if (pread(fd_vf, &value, sizeof(value), vf_offset + (i * sizeof(uint64_t))) == -1)
             return -errno;
 
         if (!IS_VERSION(value))
@@ -167,15 +169,57 @@ int read_version(size_t read_size, off_t offset, char *buf, uint64_t version, in
             uint64_t relevant_block = check_version(fd_disk, fd_file, fd_vt, fd_vf, version, version_max, i);
             if (relevant_block == -1)
             {
-                if (pread(fd_file, buf + *bytes_read, BLOCK_SIZE, i * BLOCK_SIZE) == -1)
-                    return -errno;
-                *bytes_read += BLOCK_SIZE;
+                if (is_one)
+                {
+                    if (pread(fd_file, buf + *bytes_read, to_read, (i * BLOCK_SIZE) + (offset % BLOCK_SIZE)) == -1)
+                        return -errno;
+                    *bytes_read += BLOCK_SIZE;
+                }
+                else if (is_first)
+                {
+                    if (pread(fd_file, buf + *bytes_read, to_read, (i * BLOCK_SIZE) + (offset % BLOCK_SIZE)) == -1)
+                        return -errno;
+                    *bytes_read += BLOCK_SIZE;
+                }
+                else if (is_last)
+                {
+                    if (pread(fd_file, buf + *bytes_read, to_read, i * BLOCK_SIZE) == -1)
+                        return -errno;
+                    *bytes_read += BLOCK_SIZE;
+                }
+                else
+                {
+                    if (pread(fd_file, buf + *bytes_read, BLOCK_SIZE, i * BLOCK_SIZE) == -1)
+                        return -errno;
+                    *bytes_read += BLOCK_SIZE;
+                }
             }
             else
             {
-                if (pread(fd_disk, buf + *bytes_read, BLOCK_SIZE, relevant_block * BLOCK_SIZE) == -1)
-                    return -errno;
-                *bytes_read += BLOCK_SIZE;
+                if (is_one)
+                {
+                    if (pread(fd_disk, buf + *bytes_read, to_read, (relevant_block * BLOCK_SIZE) + (offset % BLOCK_SIZE)) == -1)
+                        return -errno;
+                    *bytes_read += BLOCK_SIZE;
+                }
+                else if (is_first)
+                {
+                    if (pread(fd_file, buf + *bytes_read, to_read, (relevant_block * BLOCK_SIZE) + (offset % BLOCK_SIZE)) == -1)
+                        return -errno;
+                    *bytes_read += BLOCK_SIZE;
+                }
+                else if (is_last)
+                {
+                    if (pread(fd_file, buf + *bytes_read, to_read, relevant_block * BLOCK_SIZE) == -1)
+                        return -errno;
+                    *bytes_read += BLOCK_SIZE;
+                }
+                else
+                {
+                    if (pread(fd_disk, buf + *bytes_read, BLOCK_SIZE, relevant_block * BLOCK_SIZE) == -1)
+                        return -errno;
+                    *bytes_read += BLOCK_SIZE;
+                }
             }
             // if(pwrite(myfh->fd_vf, &relevant_block, sizeof(relevant_block), i) == -1)
             //     return errno;
