@@ -14,6 +14,7 @@ struct my_file_handle {
     int fd_vf;
     int fd_vt;                 
     int fd_disk;
+    int is_virtual;
     char path[MAX_PATH_LEN];    
 };
 void append_path(const char *path, char *out);
