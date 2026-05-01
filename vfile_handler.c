@@ -41,17 +41,23 @@ int store_blocks(size_t write_size, off_t offset, int fd_disk, int fd_file, int 
 
     for (uint64_t i = affected_interval_left; i < affected_interval_right; i++)
     {
-        if (pread(fd_file, buffer, BLOCK_SIZE, i * BLOCK_SIZE) == -1)
+        uint64_t value;
+        if (pread(fd_vf, &value, sizeof(value), vf_offset + i * sizeof(uint64_t)) == -1)
             return -errno;
+        if (IS_VERSION(value))
+        {
+            if (pread(fd_file, buffer, BLOCK_SIZE, i * BLOCK_SIZE) == -1)
+                return -errno;
 
-        if (write(fd_disk, buffer, BLOCK_SIZE) != BLOCK_SIZE)
-            return -errno;
+            if (write(fd_disk, buffer, BLOCK_SIZE) != BLOCK_SIZE)
+                return -errno;
 
-        uint64_t disk_block_id = disk_pos / BLOCK_SIZE;
-        disk_pos += BLOCK_SIZE;
+            uint64_t disk_block_id = disk_pos / BLOCK_SIZE;
+            disk_pos += BLOCK_SIZE;
 
-        if (pwrite(fd_vf, &disk_block_id, sizeof(disk_block_id), vf_offset + (i * sizeof(uint64_t))) == -1)
-            return -errno;
+            if (pwrite(fd_vf, &disk_block_id, sizeof(disk_block_id), vf_offset + (i * sizeof(uint64_t))) == -1)
+                return -errno;
+        }
     }
 
     return 0;
@@ -128,7 +134,7 @@ int read_version(size_t read_size, off_t offset, char *buf, uint64_t version, in
         else if (i == affected_interval_right - 1)
         {
             to_read = (offset + file_size) % BLOCK_SIZE;
-            if(to_read == 0)
+            if (to_read == 0)
                 to_read = BLOCK_SIZE;
             is_last = 1;
         }

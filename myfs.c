@@ -513,10 +513,10 @@ static int xmp_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
                 {
                         char vls_dir[NAME_MAX + 5];
                         snprintf(vls_dir, sizeof(vls_dir), "%s.vls", d->entry->d_name);
-                        //this could be whatever. just show fake entry
+                        // this could be whatever. just show fake entry
                         struct stat st_vls = st;
                         st_vls.st_mode = (st.st_mode & ~S_IFREG) | S_IFDIR;
-                        st_vls.st_mode |= 0555; 
+                        st_vls.st_mode |= 0555;
                         st_vls.st_nlink = 2;
                         st_vls.st_size = 4096;
 
@@ -585,7 +585,24 @@ static int xmp_unlink(const char *path)
         const char *rel_path = (path[0] == '/') ? path + 1 : path;
         if (rel_path[0] == '\0')
                 rel_path = ".";
+        char version_file[MAX_PATH_LEN + 3];
+        char version_table[MAX_PATH_LEN + 3];
+        char disk_file[MAX_PATH_LEN + 2];
+
+        snprintf(version_file, sizeof(version_file), "%s.vf", rel_path);
+        snprintf(version_table, sizeof(version_table), "%s.vt", rel_path);
+        snprintf(disk_file, sizeof(disk_file), "%s.d", rel_path);
+
         printf("[DEBUG] [myfs.c] xmp_unlink() called\n");
+        res = unlinkat(root_fd, version_file, 0);
+        if (res == -1)
+                return -errno;
+        res = unlinkat(root_fd, version_table, 0);
+        if (res == -1)
+                return -errno;
+        res = unlinkat(root_fd, disk_file, 0);
+        if (res == -1)
+                return -errno;
         res = unlinkat(root_fd, rel_path, 0);
         if (res == -1)
                 return -errno;
@@ -738,15 +755,26 @@ static int xmp_truncate(const char *path, off_t size,
                         struct fuse_file_info *fi)
 {
         int res;
-        const char *rel_path = (path[0] == '/') ? path + 1 : path;
+
+        printf("[DEBUG] [myfs.c] xmp_truncate() called\n");
+        char *actual_path;
+        struct my_file_handle *myfh;
+        if (fi)
+        {
+                myfh = (struct my_file_handle *)fi->fh;
+                actual_path = myfh->path;
+        }
+        else
+        {
+                actual_path = strdup(path);
+                if (!actual_path)
+                        return -ENOMEM;
+        }
+        if (is_internal_file(actual_path))
+                return -ENOENT;
+        const char *rel_path = (actual_path[0] == '/') ? actual_path + 1 : actual_path;
         if (rel_path[0] == '\0')
                 rel_path = ".";
-        printf("[DEBUG] [myfs.c] xmp_truncate() called\n");
-        struct my_file_handle *myfh = (struct my_file_handle *)fi->fh;
-
-        if (is_internal_file(myfh->path))
-                return -ENOENT;
-
         if (myfh)
                 res = ftruncate(myfh->fd_file, size);
         else
