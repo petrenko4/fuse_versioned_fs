@@ -17,9 +17,6 @@ int store_blocks(size_t write_size, off_t offset, int fd_disk, int fd_file, int 
         return -errno;
 
     off_t file_size = st.st_size;
-    uint64_t version;
-    if (pread(fd_vt, &version, sizeof(version), 0) == -1)
-        return -errno;
 
     uint64_t affected_interval_left = offset / BLOCK_SIZE;
 
@@ -27,15 +24,21 @@ int store_blocks(size_t write_size, off_t offset, int fd_disk, int fd_file, int 
                                            ? ((file_size + BLOCK_SIZE - 1) / BLOCK_SIZE)
                                            : (((offset + write_size) + BLOCK_SIZE - 1) / BLOCK_SIZE);
 
-    off_t disk_pos = lseek(fd_disk, 0, SEEK_END);
-    if (disk_pos == -1)
-        return -errno;
-
+    uint64_t version;
+    off_t disk_pos;
     uint64_t vf_offset;
-    if (pread(fd_vt, &vf_offset, sizeof(vf_offset), version * sizeof(uint64_t)) == -1)
-        return -errno;
+    if (affected_interval_right - affected_interval_left != 0)
+    {
+        if (pread(fd_vt, &version, sizeof(version), 0) == -1)
+            return -errno;
+        disk_pos = lseek(fd_disk, 0, SEEK_END);
+        if (disk_pos == -1)
+            return -errno;
 
-    vf_offset += 2 * sizeof(uint64_t); // skip version number(ts) and version size
+        if (pread(fd_vt, &vf_offset, sizeof(vf_offset), version * sizeof(uint64_t)) == -1)
+            return -errno;
+        vf_offset += 2 * sizeof(uint64_t); // skip version number(ts) and version size
+    }
 
     char buffer[BLOCK_SIZE];
 
