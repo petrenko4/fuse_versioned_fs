@@ -850,6 +850,7 @@ static int xmp_create(const char *path, mode_t mode, struct fuse_file_info *fi)
         struct my_file_handle *h = malloc(sizeof(struct my_file_handle));
         if (!h)
                 return -ENOMEM;
+
         h->fd_file = fd;
         h->fd_vf = fd_vf;
         h->fd_vt = fd_vt;
@@ -857,6 +858,30 @@ static int xmp_create(const char *path, mode_t mode, struct fuse_file_info *fi)
         strncpy(h->path, rel_path, MAX_PATH_LEN - 1);
         h->path[MAX_PATH_LEN - 1] = '\0';
         h->is_virtual = 0;
+        uint64_t file_size = 52;
+        uint64_t version = update_version_counter(h->fd_vt);
+        off_t vt_off = version * sizeof(uint64_t);
+
+        // update version table file
+        uint64_t offset_for_vf = lseek(h->fd_vf, 0, SEEK_END);
+        if (pwrite(h->fd_vt, &offset_for_vf, sizeof(offset_for_vf), vt_off) != sizeof(offset_for_vf))
+                return -errno;
+
+        // write version number to the version file
+        uint64_t timestamp = (uint64_t)time(NULL);
+
+        if (pwrite(h->fd_vf, &timestamp, sizeof(timestamp), offset_for_vf) != sizeof(timestamp))
+                return -errno;
+        if (pwrite(h->fd_vf, &file_size, sizeof(file_size), offset_for_vf + sizeof(uint64_t)) != sizeof(version))
+                return -errno;
+
+        uint64_t ceil_block = ((file_size + BLOCK_SIZE - 1) / BLOCK_SIZE);
+        uint64_t value = MAKE_VERSION(version + 1);
+        for (uint64_t i = 0; i < ceil_block; i += 1)
+        {
+                if (pwrite(fd_vf, &value, sizeof(value), (offset_for_vf + 2 * sizeof(uint64_t) + i * sizeof(uint64_t))) == -1)
+                        return -errno;
+        }
         fi->fh = (uint64_t)h;
         return 0;
 }
@@ -908,120 +933,148 @@ static int xmp_open(const char *path, struct fuse_file_info *fi)
                 fi->fh = (uint64_t)h;
                 return 0;
         }
-
         const char *rel_path = (path[0] == '/') ? path + 1 : path;
         if (rel_path[0] == '\0')
                 rel_path = ".";
         printf("[DEBUG] [myfs.c] xmp_open() called\n");
-
-        char version_file[PATH_MAX + 3];
-        char version_table[PATH_MAX + 3];
-        char disk_file[PATH_MAX + 2];
-
-        snprintf(version_file, sizeof(version_file), "%s.vf", rel_path);
-        snprintf(version_table, sizeof(version_table), "%s.vt", rel_path);
-        snprintf(disk_file, sizeof(disk_file), "%s.d", rel_path);
-
-        int fd_vf = openat(root_fd, version_file, O_CREAT | O_RDWR, 0644);
-        if (fd_vf == -1)
-                return -errno;
-
-        int fd_vt = openat(root_fd, version_table, O_CREAT | O_RDWR, 0644);
-        if (fd_vt == -1)
-                return -errno;
-        /* Enable direct_io when open has flags O_DIRECT to enjoy the feature
-           parallel_direct_writes (i.e., to get a shared lock, not exclusive lock,
-           for writes to the same file). */
-        int fd_disk = openat(root_fd, disk_file, O_RDWR | O_APPEND, 0644);
-        if (fd_disk == -1)
+        if (((fi->flags & O_RDWR) || (fi->flags & O_WRONLY)))
         {
-                vt_init(0, fd_vt);
-                int fd_disk = openat(root_fd, disk_file, O_CREAT | O_RDWR | O_APPEND, 0644);
-        }
-        if (fd_disk == -1)
-                return -errno;
 
-        if (fi->flags & O_DIRECT)
-        {
-                fi->direct_io = 1;
-                fi->parallel_direct_writes = 1;
-        }
+                char version_file[PATH_MAX + 3];
+                char version_table[PATH_MAX + 3];
+                char disk_file[PATH_MAX + 2];
 
-        h->fd_vf = fd_vf;
-        h->fd_vt = fd_vt;
-        h->fd_disk = fd_disk;
-        strncpy(h->path, rel_path, MAX_PATH_LEN - 1);
-        h->path[MAX_PATH_LEN - 1] = '\0';
-        h->is_virtual = 0;
-        fi->fh = (uint64_t)h;
-        int trunced = 0;
+                snprintf(version_file, sizeof(version_file), "%s.vf", rel_path);
+                snprintf(version_table, sizeof(version_table), "%s.vt", rel_path);
+                snprintf(disk_file, sizeof(disk_file), "%s.d", rel_path);
 
-        int fd_file = openat(root_fd, rel_path, O_RDWR, 0644);
-        if (fd_file == -1)
-                return -errno;
-        struct stat sb;
-        if (fstat(fd_file, &sb) == -1)
-                return -errno;
-        uint64_t file_size = sb.st_size;
-        if (fi->flags & O_TRUNC)
-        {
-                trunced = 1;
+                int fd_vf = openat(root_fd, version_file, O_CREAT | O_RDWR, 0644);
+                if (fd_vf == -1)
+                        return -errno;
 
-                if (file_size > 0)
+                int fd_vt = openat(root_fd, version_table, O_CREAT | O_RDWR, 0644);
+                if (fd_vt == -1)
+                        return -errno;
+                /* Enable direct_io when open has flags O_DIRECT to enjoy the feature
+                   parallel_direct_writes (i.e., to get a shared lock, not exclusive lock,
+                   for writes to the same file). */
+                int fd_disk = openat(root_fd, disk_file, O_RDWR | O_APPEND, 0644);
+                if (fd_disk == -1)
                 {
-                        uint64_t version = update_version_counter(h->fd_vt);
-                        off_t vt_off = version * sizeof(uint64_t);
+                        vt_init(0, fd_vt);
+                        int fd_disk = openat(root_fd, disk_file, O_CREAT | O_RDWR | O_APPEND, 0644);
+                }
+                if (fd_disk == -1)
+                        return -errno;
 
-                        // update version table file
-                        uint64_t offset_for_vf = lseek(h->fd_vf, 0, SEEK_END);
-                        if (pwrite(h->fd_vt, &offset_for_vf, sizeof(offset_for_vf), vt_off) != sizeof(offset_for_vf))
-                                return -errno;
+                if (fi->flags & O_DIRECT)
+                {
+                        fi->direct_io = 1;
+                        fi->parallel_direct_writes = 1;
+                }
+                int fd_file = openat(root_fd, rel_path, O_RDWR, 0644);
+                if (fd_file == -1)
+                        return -errno;
+                struct stat sb;
+                if (fstat(fd_file, &sb) == -1)
+                        return -errno;
+                uint64_t file_size = sb.st_size;
+                uint64_t version = update_version_counter(fd_vt);
+                off_t vt_off = version * sizeof(uint64_t);
 
-                        // write version number to the version file
-                        uint64_t timestamp = (uint64_t)time(NULL);
+                // update version table file
+                uint64_t offset_for_vf = lseek(fd_vf, 0, SEEK_END);
+                if (pwrite(fd_vt, &offset_for_vf, sizeof(offset_for_vf), vt_off) != sizeof(offset_for_vf))
+                        return -errno;
 
-                        if (pwrite(h->fd_vf, &timestamp, sizeof(timestamp), offset_for_vf) != sizeof(timestamp))
-                                return -errno;
-                        if (pwrite(h->fd_vf, &file_size, sizeof(file_size), offset_for_vf + sizeof(uint64_t)) != sizeof(version))
-                                return -errno;
-                        if (store_blocks(file_size, 0, h->fd_disk, fd_file, h->fd_vt, h->fd_vf) == -1)
+                // write version number to the version file
+                uint64_t timestamp = (uint64_t)time(NULL);
+
+                if (pwrite(fd_vf, &timestamp, sizeof(timestamp), offset_for_vf) != sizeof(timestamp))
+                        return -errno;
+                if (pwrite(fd_vf, &file_size, sizeof(file_size), offset_for_vf + sizeof(uint64_t)) != sizeof(version))
+                        return -errno;
+
+                uint64_t ceil_block = ((file_size + BLOCK_SIZE - 1) / BLOCK_SIZE);
+                uint64_t value = MAKE_VERSION(version + 1);
+                for (uint64_t i = 0; i < ceil_block; i += 1)
+                {
+                        if (pwrite(fd_vf, &value, sizeof(value), (offset_for_vf + 2 * sizeof(uint64_t) + i * sizeof(uint64_t))) == -1)
                                 return -errno;
                 }
-        }
-        else
-        {
-                if (((fi->flags & O_RDWR) || (fi->flags & O_WRONLY)) && !trunced)
-                {
-                        if (file_size > 0)
-                        {
-                                uint64_t version = update_version_counter(h->fd_vt);
-                                off_t vt_off = version * sizeof(uint64_t);
+                h->fd_vf = fd_vf;
+                h->fd_vt = fd_vt;
+                h->fd_disk = fd_disk;
 
-                                // update version table file
-                                uint64_t offset_for_vf = lseek(h->fd_vf, 0, SEEK_END);
-                                if (pwrite(h->fd_vt, &offset_for_vf, sizeof(offset_for_vf), vt_off) != sizeof(offset_for_vf))
-                                        return -errno;
-
-                                // write version number to the version file
-                                uint64_t timestamp = (uint64_t)time(NULL);
-
-                                if (pwrite(h->fd_vf, &timestamp, sizeof(timestamp), offset_for_vf) != sizeof(timestamp))
-                                        return -errno;
-                                if (pwrite(h->fd_vf, &file_size, sizeof(file_size), offset_for_vf + sizeof(uint64_t)) != sizeof(version))
-                                        return -errno;
-
-                                uint64_t ceil_block = ((file_size + BLOCK_SIZE - 1) / BLOCK_SIZE);
-                                uint64_t value = MAKE_VERSION(version + 1);
-                                for (uint64_t i = 0; i < ceil_block; i += 1)
-                                {
-                                        if (pwrite(fd_vf, &value, sizeof(value), (offset_for_vf + 2 * sizeof(uint64_t) + i * sizeof(uint64_t))) == -1)
-                                                return -errno;
-                                }
-                        }
-                }
+                int trunced = 0;
         }
 
-        close(fd_file);
+        // int fd_file = openat(root_fd, rel_path, O_RDWR, 0644);
+        // if (fd_file == -1)
+        //         return -errno;
+        // struct stat sb;
+        // if (fstat(fd_file, &sb) == -1)
+        //         return -errno;
+        // uint64_t file_size = sb.st_size;
+        // // if (fi->flags & O_TRUNC)
+        // // {
+        // //         trunced = 1;
+
+        // //         if (file_size > 0)
+        // //         {
+        // //                 uint64_t version = update_version_counter(h->fd_vt);
+        // //                 off_t vt_off = version * sizeof(uint64_t);
+
+        // //                 // update version table file
+        // //                 uint64_t offset_for_vf = lseek(h->fd_vf, 0, SEEK_END);
+        // //                 if (pwrite(h->fd_vt, &offset_for_vf, sizeof(offset_for_vf), vt_off) != sizeof(offset_for_vf))
+        // //                         return -errno;
+
+        // //                 // write version number to the version file
+        // //                 uint64_t timestamp = (uint64_t)time(NULL);
+
+        // //                 if (pwrite(h->fd_vf, &timestamp, sizeof(timestamp), offset_for_vf) != sizeof(timestamp))
+        // //                         return -errno;
+        // //                 if (pwrite(h->fd_vf, &file_size, sizeof(file_size), offset_for_vf + sizeof(uint64_t)) != sizeof(version))
+        // //                         return -errno;
+        // //                 if (store_blocks(file_size, 0, h->fd_disk, fd_file, h->fd_vt, h->fd_vf) == -1)
+        // //                         return -errno;
+        // //         }
+        // // }
+        // // else
+        // // {
+        // //         if (((fi->flags & O_RDWR) || (fi->flags & O_WRONLY)) && !trunced)
+        // //         {
+        // //                 if (file_size > 0)
+        // //                 {
+        // //                         uint64_t version = update_version_counter(h->fd_vt);
+        // //                         off_t vt_off = version * sizeof(uint64_t);
+
+        // //                         // update version table file
+        // //                         uint64_t offset_for_vf = lseek(h->fd_vf, 0, SEEK_END);
+        // //                         if (pwrite(h->fd_vt, &offset_for_vf, sizeof(offset_for_vf), vt_off) != sizeof(offset_for_vf))
+        // //                                 return -errno;
+
+        // //                         // write version number to the version file
+        // //                         uint64_t timestamp = (uint64_t)time(NULL);
+
+        // //                         if (pwrite(h->fd_vf, &timestamp, sizeof(timestamp), offset_for_vf) != sizeof(timestamp))
+        // //                                 return -errno;
+        // //                         if (pwrite(h->fd_vf, &file_size, sizeof(file_size), offset_for_vf + sizeof(uint64_t)) != sizeof(version))
+        // //                                 return -errno;
+
+        // //                         uint64_t ceil_block = ((file_size + BLOCK_SIZE - 1) / BLOCK_SIZE);
+        // //                         uint64_t value = MAKE_VERSION(version + 1);
+        // //                         for (uint64_t i = 0; i < ceil_block; i += 1)
+        // //                         {
+        // //                                 if (pwrite(fd_vf, &value, sizeof(value), (offset_for_vf + 2 * sizeof(uint64_t) + i * sizeof(uint64_t))) == -1)
+        // //                                         return -errno;
+        // //                         }
+        // //                 }
+        // //         }
+        // // }
+
+        // close(fd_file);
         int res;
         if ((fi->flags & O_ACCMODE) == O_WRONLY)
         {
@@ -1032,6 +1085,10 @@ static int xmp_open(const char *path, struct fuse_file_info *fi)
         if (res == -1)
                 return -errno;
         h->fd_file = res;
+        strncpy(h->path, rel_path, MAX_PATH_LEN - 1);
+        h->path[MAX_PATH_LEN - 1] = '\0';
+        h->is_virtual = 0;
+        fi->fh = (uint64_t)h;
         return 0;
 }
 
@@ -1148,11 +1205,14 @@ static int xmp_write(const char *path, const char *buf, size_t size,
         if (is_internal_file(myfh->path))
                 return -ENOENT;
         int res;
-        if (store_blocks(size, offset, myfh->fd_disk, myfh->fd_file, myfh->fd_vt, myfh->fd_vf) != 0)
-                return -errno;
+
         res = pwrite(myfh->fd_file, buf, size, offset);
         if (res == -1)
                 res = -errno;
+
+        if (store_blocks(size, offset, myfh->fd_disk, myfh->fd_file, myfh->fd_vt, myfh->fd_vf) != 0)
+                return -errno;
+
         return res;
 }
 
@@ -1217,6 +1277,23 @@ static int xmp_release(const char *path, struct fuse_file_info *fi)
                 return -ENOENT;
         printf("[DEBUG] [myfs.c] xmp_release() called\n");
         struct my_file_handle *myfh = (struct my_file_handle *)fi->fh;
+
+        uint64_t version;
+        if (pread(myfh->fd_vt, &version, sizeof(version), 0) == -1)
+                return -errno;
+
+        uint64_t vf_offset;
+        if (pread(myfh->fd_vt, &vf_offset, sizeof(vf_offset), version * sizeof(uint64_t)) == -1)
+                return -errno;
+
+        struct stat sb;
+        if (fstat(myfh->fd_file, &sb) == -1)
+                return -errno;
+        uint64_t file_size = sb.st_size;
+
+        if (pwrite(myfh->fd_vf, &file_size, sizeof(file_size), vf_offset + sizeof(uint64_t)) == -1)
+                return -errno;
+
         //?
         if (myfh->is_virtual)
 

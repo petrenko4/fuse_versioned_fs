@@ -26,26 +26,56 @@ int store_blocks(size_t write_size, off_t offset, int fd_disk, int fd_file, int 
     uint64_t affected_interval_right = (file_size < (offset + write_size))
                                            ? ((file_size + BLOCK_SIZE - 1) / BLOCK_SIZE)
                                            : (((offset + write_size) + BLOCK_SIZE - 1) / BLOCK_SIZE);
-
-    off_t disk_pos = lseek(fd_disk, 0, SEEK_END);
-    if (disk_pos == -1)
-        return -errno;
-
-    uint64_t vf_offset;
-    if (pread(fd_vt, &vf_offset, sizeof(vf_offset), version * sizeof(uint64_t)) == -1)
-        return -errno;
-
-    vf_offset += 2 * sizeof(uint64_t); // skip version number(ts) and version size
-
-    char buffer[BLOCK_SIZE];
-
-    for (uint64_t i = affected_interval_left; i < affected_interval_right; i++)
+    if (affected_interval_left != affected_interval_right)
     {
-        uint64_t value;
-        if (pread(fd_vf, &value, sizeof(value), vf_offset + i * sizeof(uint64_t)) == -1)
+        off_t disk_pos = lseek(fd_disk, 0, SEEK_END);
+        if (disk_pos == -1)
             return -errno;
-        if (IS_VERSION(value))
+
+        uint64_t vf_offset;
+        if (pread(fd_vt, &vf_offset, sizeof(vf_offset), version * sizeof(uint64_t)) == -1)
+            return -errno;
+
+        vf_offset += 2 * sizeof(uint64_t); // skip version number(ts) and version size
+
+        char buffer[BLOCK_SIZE];
+        uint64_t total_blocks = (file_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
+        if (version > 1)
         {
+            uint64_t prev_version = version - 1;
+
+            uint64_t prev_vf_offset;
+            if (pread(fd_vt, &prev_vf_offset, sizeof(prev_vf_offset), prev_version * sizeof(uint64_t)) == -1)
+                return -errno;
+
+            prev_vf_offset += 2 * sizeof(uint64_t);
+            for (uint64_t i = 0; i < affected_interval_left; i++)
+            {
+                uint64_t value;
+                if (pread(fd_vf, &value, sizeof(value), prev_vf_offset + i * sizeof(uint64_t)) == -1)
+                    return -errno;
+
+                if (pwrite(fd_vf, &value, sizeof(value), vf_offset + i * sizeof(uint64_t)) == -1)
+                    return -errno;
+            }
+            for (uint64_t i = affected_interval_right; i < total_blocks; i++)
+            {
+                uint64_t value;
+                if (pread(fd_vf, &value, sizeof(value), prev_vf_offset + i * sizeof(uint64_t)) == -1)
+                    return -errno;
+
+                if (pwrite(fd_vf, &value, sizeof(value), vf_offset + i * sizeof(uint64_t)) == -1)
+                    return -errno;
+            }
+        }
+
+        for (uint64_t i = affected_interval_left; i < affected_interval_right; i++)
+        {
+            uint64_t value;
+            if (pread(fd_vf, &value, sizeof(value), vf_offset + i * sizeof(uint64_t)) == -1)
+                return -errno;
+            // if (IS_VERSION(value))
+            // {
             if (pread(fd_file, buffer, BLOCK_SIZE, i * BLOCK_SIZE) == -1)
                 return -errno;
 
@@ -57,6 +87,7 @@ int store_blocks(size_t write_size, off_t offset, int fd_disk, int fd_file, int 
 
             if (pwrite(fd_vf, &disk_block_id, sizeof(disk_block_id), vf_offset + (i * sizeof(uint64_t))) == -1)
                 return -errno;
+            // }
         }
     }
 
