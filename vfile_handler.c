@@ -38,31 +38,30 @@ int store_blocks(size_t write_size, off_t offset, int fd_disk, int fd_file, int 
         if (pread(fd_vt, &vf_offset, sizeof(vf_offset), version * sizeof(uint64_t)) == -1)
             return -errno;
         vf_offset += 2 * sizeof(uint64_t); // skip version number(ts) and version size
-    }
 
-    char buffer[BLOCK_SIZE];
+        char buffer[BLOCK_SIZE];
 
-    for (uint64_t i = affected_interval_left; i < affected_interval_right; i++)
-    {
-        uint64_t value;
-        if (pread(fd_vf, &value, sizeof(value), vf_offset + i * sizeof(uint64_t)) == -1)
-            return -errno;
-        if (IS_VERSION(value))
+        for (uint64_t i = affected_interval_left; i < affected_interval_right; i++)
         {
-            if (pread(fd_file, buffer, BLOCK_SIZE, i * BLOCK_SIZE) == -1)
+            uint64_t value;
+            if (pread(fd_vf, &value, sizeof(value), vf_offset + i * sizeof(uint64_t)) == -1)
                 return -errno;
+            if (IS_VERSION(value))
+            {
+                if (pread(fd_file, buffer, BLOCK_SIZE, i * BLOCK_SIZE) == -1)
+                    return -errno;
 
-            if (write(fd_disk, buffer, BLOCK_SIZE) != BLOCK_SIZE)
-                return -errno;
+                if (write(fd_disk, buffer, BLOCK_SIZE) != BLOCK_SIZE)
+                    return -errno;
 
-            uint64_t disk_block_id = disk_pos / BLOCK_SIZE;
-            disk_pos += BLOCK_SIZE;
+                uint64_t disk_block_id = disk_pos / BLOCK_SIZE;
+                disk_pos += BLOCK_SIZE;
 
-            if (pwrite(fd_vf, &disk_block_id, sizeof(disk_block_id), vf_offset + (i * sizeof(uint64_t))) == -1)
-                return -errno;
+                if (pwrite(fd_vf, &disk_block_id, sizeof(disk_block_id), vf_offset + (i * sizeof(uint64_t))) == -1)
+                    return -errno;
+            }
         }
     }
-
     return 0;
 }
 
@@ -85,6 +84,10 @@ uint64_t check_version(int fd_disk, int fd_file, int fd_vt, int fd_vf, uint64_t 
         return value;
 
     uint64_t res = check_version(fd_disk, fd_file, fd_vt, fd_vf, GET_VALUE(value), version_max, block_number);
+
+
+    // if (pwrite(fd_vf, &res, sizeof(res), vf_off + 2 * sizeof(uint64_t) + block_number * sizeof(uint64_t)) == -1)
+    //     return errno;
 
     // if (pwrite(myfh->fd_vf, &res, sizeof(value), vf_off + 2 * sizeof(uint64_t) + block_number * sizeof(uint64_t)) == -1)
     //     return errno;

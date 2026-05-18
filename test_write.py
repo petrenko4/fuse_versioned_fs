@@ -4,9 +4,9 @@ import statistics
 import os
 
 # CONFIG
-runs = 2
-file_size = "500m"  # Increased slightly for better sampling
-directory = "mnt/"
+runs = 15
+file_size = "3G"  # Increased slightly for better sampling
+directory = "/tmp/"
 times = []
 fio_command = [
     "fio",
@@ -15,7 +15,6 @@ fio_command = [
     f"--directory={directory}",
     "--bs=4k",
     "--rw=write",
-    "--unlink=1",
     "--output-format=json"
 ]
 print("="*30)

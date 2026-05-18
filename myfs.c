@@ -103,7 +103,7 @@ int ends_with(const char *str, const char *suffix)
         return strcmp(str + len_str - len_suffix, suffix) == 0;
 }
 
-void fill_virtual_stats_dir(struct stat *stbuf)
+int fill_virtual_stats_dir(struct stat *stbuf)
 {
         memset(stbuf, 0, sizeof(struct stat));
 
@@ -119,7 +119,7 @@ void fill_virtual_stats_dir(struct stat *stbuf)
         stbuf->st_size = 4096;
 }
 
-void fill_virtual_stats_reg(struct stat *stbuf, struct my_file_handle *myfh, uint64_t version)
+int fill_virtual_stats_reg(struct stat *stbuf, struct my_file_handle *myfh, uint64_t version)
 {
         if (myfh)
         {
@@ -144,7 +144,7 @@ void fill_virtual_stats_reg(struct stat *stbuf, struct my_file_handle *myfh, uin
         }
 }
 
-void fill_virtual_stats_reg_nofh(struct stat *stbuf, char *path)
+int fill_virtual_stats_reg_nofh(struct stat *stbuf, char *path)
 {
         char *actual_path = strdup(path);
         char *at_ptr = strrchr(actual_path, '@');
@@ -984,6 +984,13 @@ static int xmp_open(const char *path, struct fuse_file_info *fi)
                                 return -errno;
                         if (pwrite(h->fd_vf, &file_size, sizeof(file_size), offset_for_vf + sizeof(uint64_t)) != sizeof(version))
                                 return -errno;
+                        uint64_t ceil_block = ((file_size + BLOCK_SIZE - 1) / BLOCK_SIZE);
+                        uint64_t value = MAKE_VERSION(version + 1);
+                        for (uint64_t i = 0; i < ceil_block; i += 1)
+                        {
+                                if (pwrite(fd_vf, &value, sizeof(value), (offset_for_vf + 2 * sizeof(uint64_t) + i * sizeof(uint64_t))) == -1)
+                                        return -errno;
+                        }
                         if (store_blocks(file_size, 0, h->fd_disk, fd_file, h->fd_vt, h->fd_vf) == -1)
                                 return -errno;
                 }

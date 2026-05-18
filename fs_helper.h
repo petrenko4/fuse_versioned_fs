@@ -3,7 +3,7 @@
 #define BASE_PATH "/home/getcandy/fuse_versioned_fs/fuse/"
 #define DISK_FILE "/workspaces/fuse_versioned_fs/disk"
 #define MAX_PATH_LEN 1024
-#define BLOCK_SIZE 4096
+#define BLOCK_SIZE 16
 
 #include <stdio.h>
 #include <string.h>
