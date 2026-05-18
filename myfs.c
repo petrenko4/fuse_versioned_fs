@@ -119,7 +119,7 @@ void fill_virtual_stats_dir(struct stat *stbuf)
         stbuf->st_size = 4096;
 }
 
-void fill_virtual_stats_reg(struct stat *stbuf, struct my_file_handle *myfh, uint64_t version)
+int fill_virtual_stats_reg(struct stat *stbuf, struct my_file_handle *myfh, uint64_t version)
 {
         if (myfh)
         {
@@ -144,7 +144,7 @@ void fill_virtual_stats_reg(struct stat *stbuf, struct my_file_handle *myfh, uin
         }
 }
 
-void fill_virtual_stats_reg_nofh(struct stat *stbuf, char *path)
+int fill_virtual_stats_reg_nofh(struct stat *stbuf, char *path)
 {
         char *actual_path = strdup(path);
         char *at_ptr = strrchr(actual_path, '@');
@@ -994,14 +994,37 @@ static int xmp_open(const char *path, struct fuse_file_info *fi)
                         return -errno;
                 if (pwrite(fd_vf, &file_size, sizeof(file_size), offset_for_vf + sizeof(uint64_t)) != sizeof(version))
                         return -errno;
-
-                uint64_t ceil_block = ((file_size + BLOCK_SIZE - 1) / BLOCK_SIZE);
-                uint64_t value = MAKE_VERSION(version + 1);
-                for (uint64_t i = 0; i < ceil_block; i += 1)
+                if (version > 1)
                 {
-                        if (pwrite(fd_vf, &value, sizeof(value), (offset_for_vf + 2 * sizeof(uint64_t) + i * sizeof(uint64_t))) == -1)
+
+                        uint64_t ceil_block = ((file_size + BLOCK_SIZE - 1) / BLOCK_SIZE);
+                        uint64_t prev_version = version - 1;
+
+                        uint64_t vf_offset;
+                        if (pread(fd_vt, &vf_offset, sizeof(vf_offset), version * sizeof(uint64_t)) == -1)
                                 return -errno;
+
+                        vf_offset += 2 * sizeof(uint64_t); // skip version number(ts) and version size
+                        uint64_t prev_vf_offset;
+                        if (pread(fd_vt, &prev_vf_offset, sizeof(prev_vf_offset), prev_version * sizeof(uint64_t)) == -1)
+                                return -errno;
+
+                        prev_vf_offset += 2 * sizeof(uint64_t);
+                        for (uint64_t i = 0; i < ceil_block; i++)
+                        {
+                                uint64_t value;
+                                if (pread(fd_vf, &value, sizeof(value), prev_vf_offset + i * sizeof(uint64_t)) == -1)
+                                        return -errno;
+
+                                if (pwrite(fd_vf, &value, sizeof(value), vf_offset + i * sizeof(uint64_t)) == -1)
+                                        return -errno;
+                        }
                 }
+                // for (uint64_t i = 0; i < ceil_block; i += 1)
+                // {
+                //         if (pwrite(fd_vf, &value, sizeof(value), (offset_for_vf + 2 * sizeof(uint64_t) + i * sizeof(uint64_t))) == -1)
+                //                 return -errno;
+                // }
                 h->fd_vf = fd_vf;
                 h->fd_vt = fd_vt;
                 h->fd_disk = fd_disk;

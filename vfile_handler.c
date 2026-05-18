@@ -40,34 +40,34 @@ int store_blocks(size_t write_size, off_t offset, int fd_disk, int fd_file, int 
 
         char buffer[BLOCK_SIZE];
         uint64_t total_blocks = (file_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
-        if (version > 1)
-        {
-            uint64_t prev_version = version - 1;
+        // if (version > 1)
+        // {
+        //     uint64_t prev_version = version - 1;
 
-            uint64_t prev_vf_offset;
-            if (pread(fd_vt, &prev_vf_offset, sizeof(prev_vf_offset), prev_version * sizeof(uint64_t)) == -1)
-                return -errno;
+        //     uint64_t prev_vf_offset;
+        //     if (pread(fd_vt, &prev_vf_offset, sizeof(prev_vf_offset), prev_version * sizeof(uint64_t)) == -1)
+        //         return -errno;
 
-            prev_vf_offset += 2 * sizeof(uint64_t);
-            for (uint64_t i = 0; i < affected_interval_left; i++)
-            {
-                uint64_t value;
-                if (pread(fd_vf, &value, sizeof(value), prev_vf_offset + i * sizeof(uint64_t)) == -1)
-                    return -errno;
+        //     prev_vf_offset += 2 * sizeof(uint64_t);
+        //     for (uint64_t i = 0; i < affected_interval_left; i++)
+        //     {
+        //         uint64_t value;
+        //         if (pread(fd_vf, &value, sizeof(value), prev_vf_offset + i * sizeof(uint64_t)) == -1)
+        //             return -errno;
 
-                if (pwrite(fd_vf, &value, sizeof(value), vf_offset + i * sizeof(uint64_t)) == -1)
-                    return -errno;
-            }
-            for (uint64_t i = affected_interval_right; i < total_blocks; i++)
-            {
-                uint64_t value;
-                if (pread(fd_vf, &value, sizeof(value), prev_vf_offset + i * sizeof(uint64_t)) == -1)
-                    return -errno;
+        //         if (pwrite(fd_vf, &value, sizeof(value), vf_offset + i * sizeof(uint64_t)) == -1)
+        //             return -errno;
+        //     }
+        //     for (uint64_t i = affected_interval_right; i < total_blocks; i++)
+        //     {
+        //         uint64_t value;
+        //         if (pread(fd_vf, &value, sizeof(value), prev_vf_offset + i * sizeof(uint64_t)) == -1)
+        //             return -errno;
 
-                if (pwrite(fd_vf, &value, sizeof(value), vf_offset + i * sizeof(uint64_t)) == -1)
-                    return -errno;
-            }
-        }
+        //         if (pwrite(fd_vf, &value, sizeof(value), vf_offset + i * sizeof(uint64_t)) == -1)
+        //             return -errno;
+        //     }
+        // }
 
         for (uint64_t i = affected_interval_left; i < affected_interval_right; i++)
         {
