@@ -497,7 +497,7 @@ static int xmp_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
                 {
                         memset(&st, 0, sizeof(st));
                         st.st_ino = d->entry->d_ino;
-                        st.st_mode = d->entry->d_type << 12;
+				st.st_mode = d->entry->d_type << 12;
                 }
                 nextoff = telldir(d->dp);
 #ifdef __FreeBSD__
@@ -936,7 +936,7 @@ static int xmp_open(const char *path, struct fuse_file_info *fi)
         if (fd_disk == -1)
         {
                 vt_init(0, fd_vt);
-                int fd_disk = openat(root_fd, disk_file, O_CREAT | O_RDWR | O_APPEND, 0644);
+                fd_disk = openat(root_fd, disk_file, O_CREAT | O_RDWR | O_APPEND, 0644);
         }
         if (fd_disk == -1)
                 return -errno;
@@ -991,6 +991,7 @@ static int xmp_open(const char *path, struct fuse_file_info *fi)
                                 if (pwrite(fd_vf, &value, sizeof(value), (offset_for_vf + 2 * sizeof(uint64_t) + i * sizeof(uint64_t))) == -1)
                                         return -errno;
                         }
+
                         if (store_blocks(file_size, 0, h->fd_disk, fd_file, h->fd_vt, h->fd_vf) == -1)
                                 return -errno;
                 }

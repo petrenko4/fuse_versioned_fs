@@ -1,14 +1,5 @@
-build the container image:
-    docker build -t fuse_workspace .
-
-run Docker container:
-    docker run -it --cap-add SYS_ADMIN --device /dev/fuse  --security-opt apparmor:unconfined fuse_workspace
-
-build command:
-    gcc -fdiagnostics-color=always -g -Wall myfs.c fs_helper.c `pkg-config fuse3 --cflags --libs` -o myfs
+build:
+    gcc -fdiagnostics-color=always -Wall vfile_handler.c vtable_handler.c fs_helper.c myfs.c `pkg-config fuse3 --cflags --libs` -o myfs
 
 example usage:
     ./myfs mnt/
-
-test:
-  fio --name=test --rw=write --bs=4k --size=100m --directory=mnt/
