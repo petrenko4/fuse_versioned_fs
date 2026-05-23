@@ -2,10 +2,11 @@ fuse/*
 mnt/*
 myfs
 run.sh
-test_sequence.sh
 tasklist
 versionview
 networks*
 disk
 mnt_passthrough/*
 passthrough*
+test_read.py
+test_write.py
