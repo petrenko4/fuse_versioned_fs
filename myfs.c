@@ -589,9 +589,9 @@ static int xmp_unlink(const char *path)
         const char *rel_path = (path[0] == '/') ? path + 1 : path;
         if (rel_path[0] == '\0')
                 rel_path = ".";
-        char version_file[MAX_PATH_LEN + 3];
-        char version_table[MAX_PATH_LEN + 3];
-        char disk_file[MAX_PATH_LEN + 2];
+        char version_file[PATH_MAX + 3];
+        char version_table[PATH_MAX + 3];
+        char disk_file[PATH_MAX + 2];
 
         snprintf(version_file, sizeof(version_file), "%s..vf.", rel_path);
         snprintf(version_table, sizeof(version_table), "%s..vt.", rel_path);
@@ -832,9 +832,9 @@ static int xmp_create(const char *path, mode_t mode, struct fuse_file_info *fi)
         if (fd == -1)
                 return -errno;
 
-        char version_file[MAX_PATH_LEN + 3];
-        char version_table[MAX_PATH_LEN + 3];
-        char disk_file[MAX_PATH_LEN + 2];
+        char version_file[PATH_MAX + 3];
+        char version_table[PATH_MAX + 3];
+        char disk_file[PATH_MAX + 2];
 
         snprintf(version_file, sizeof(version_file), "%s..vf.", rel_path);
         snprintf(version_table, sizeof(version_table), "%s..vt.", rel_path);
@@ -860,8 +860,8 @@ static int xmp_create(const char *path, mode_t mode, struct fuse_file_info *fi)
         h->fd_vf = fd_vf;
         h->fd_vt = fd_vt;
         h->fd_disk = fd_disk;
-        strncpy(h->path, rel_path, MAX_PATH_LEN - 1);
-        h->path[MAX_PATH_LEN - 1] = '\0';
+        strncpy(h->path, rel_path, PATH_MAX - 1);
+        h->path[PATH_MAX - 1] = '\0';
         h->is_virtual = 0;
         fi->fh = (uint64_t)h;
         return 0;
@@ -883,15 +883,15 @@ static int xmp_open(const char *path, struct fuse_file_info *fi)
 
                 char *vls_ptr = strstr(base_path, ".vls/");
                 *vls_ptr = '\0';
-                char version_file[MAX_PATH_LEN + 3];
-                char version_table[MAX_PATH_LEN + 3];
-                char disk_file[MAX_PATH_LEN + 2];
+                char version_file[PATH_MAX + 3];
+                char version_table[PATH_MAX + 3];
+                char disk_file[PATH_MAX + 2];
 
                 snprintf(version_file, sizeof(version_file), "%s..vf.", base_path);
                 snprintf(version_table, sizeof(version_table), "%s..vt.", base_path);
                 snprintf(disk_file, sizeof(disk_file), "%s..d.", base_path);
 
-                h->fd_vf = openat(root_fd, version_file, O_RDONLY, 0644);
+                h->fd_vf = openat(root_fd, version_file, O_RDWR, 0644);
                 if (h->fd_vf == -1)
                         return -errno;
 
@@ -909,8 +909,8 @@ static int xmp_open(const char *path, struct fuse_file_info *fi)
                 if (!myfh)
                         return -ENOMEM;
                 h->is_virtual = 1;
-                strncpy(h->path, path, MAX_PATH_LEN - 1);
-                h->path[MAX_PATH_LEN - 1] = '\0';
+                strncpy(h->path, path, PATH_MAX - 1);
+                h->path[PATH_MAX - 1] = '\0';
                 fi->fh = (uint64_t)h;
                 return 0;
         }
@@ -956,8 +956,8 @@ static int xmp_open(const char *path, struct fuse_file_info *fi)
         h->fd_vf = fd_vf;
         h->fd_vt = fd_vt;
         h->fd_disk = fd_disk;
-        strncpy(h->path, rel_path, MAX_PATH_LEN - 1);
-        h->path[MAX_PATH_LEN - 1] = '\0';
+        strncpy(h->path, rel_path, PATH_MAX - 1);
+        h->path[PATH_MAX - 1] = '\0';
         h->is_virtual = 0;
         fi->fh = (uint64_t)h;
         int trunced = 0;

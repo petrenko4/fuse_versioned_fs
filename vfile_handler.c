@@ -85,7 +85,13 @@ uint64_t check_version(int fd_disk, int fd_file, int fd_vt, int fd_vf, uint64_t 
 
     uint64_t res = check_version(fd_disk, fd_file, fd_vt, fd_vf, GET_VALUE(value), version_max, block_number);
 
+    if (res == -1)
+    {
+        uint64_t latest_version_ref = MAKE_VERSION(version_max + 1);
+        if(pwrite(fd_vf, &latest_version_ref, sizeof(latest_version_ref), vf_off + 2 * sizeof(uint64_t) + block_number * sizeof(uint64_t)) == -1)
+            return errno;
 
+    }
     // if (pwrite(fd_vf, &res, sizeof(res), vf_off + 2 * sizeof(uint64_t) + block_number * sizeof(uint64_t)) == -1)
     //     return errno;
 
@@ -178,7 +184,7 @@ int read_version(size_t read_size, off_t offset, char *buf, uint64_t version, in
         else
         {
 
-            uint64_t relevant_block = check_version(fd_disk, fd_file, fd_vt, fd_vf, version, version_max, i);
+            uint64_t relevant_block = check_version(fd_disk, fd_file, fd_vt, fd_vf, GET_VALUE(value), version_max, i);
             if (relevant_block == -1)
             {
                 if (is_one)
