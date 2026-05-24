@@ -15,7 +15,7 @@ struct my_file_handle {
     int is_virtual;
     char path[PATH_MAX];    
 };
-void append_path(const char *path, char *out);
+
 int is_internal_file(const char *path);
 
 #endif

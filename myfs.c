@@ -85,9 +85,9 @@ int is_virtfile(const char *path)
         if (strstr(path, ".vls/"))
                 return 1;
 
-        if(strchr(path, '@'))
+        if (strchr(path, '@'))
                 return 1;
-        
+
         return 0;
 }
 
@@ -119,6 +119,7 @@ int fill_virtual_stats_dir(struct stat *stbuf)
         stbuf->st_atime = stbuf->st_mtime = stbuf->st_ctime = time(NULL);
 
         stbuf->st_size = 4096;
+        return 0;
 }
 
 int fill_virtual_stats_reg(struct stat *stbuf, struct my_file_handle *myfh, uint64_t version)
@@ -143,7 +144,9 @@ int fill_virtual_stats_reg(struct stat *stbuf, struct my_file_handle *myfh, uint
                         return -errno;
                 stbuf->st_size = file_size;
                 stbuf->st_mtime = stbuf->st_atime = stbuf->st_ctime = timestamp;
+                return 0;
         }
+        return 0;
 }
 
 int fill_virtual_stats_reg_nofh(struct stat *stbuf, char *path)
@@ -161,7 +164,7 @@ int fill_virtual_stats_reg_nofh(struct stat *stbuf, char *path)
 
         const char *rel_path = (actual_path[0] == '/') ? actual_path + 1 : actual_path;
 
-        char base_path[PATH_MAX];
+        char base_path[PATH_MAX - 5];
         strncpy(base_path, rel_path, sizeof(base_path) - 1);
         base_path[sizeof(base_path) - 1] = '\0';
 
@@ -201,10 +204,15 @@ int fill_virtual_stats_reg_nofh(struct stat *stbuf, char *path)
         close(fd_vf);
         close(fd_vt);
         free(actual_path);
+
+        return 0;
 }
 static int xmp_getattr(const char *path, struct stat *stbuf,
                        struct fuse_file_info *fi)
 {
+
+    
+        printf("[DEBUG] [myfs.c] xmp_getattr() called\n");
         char *actual_path;
         if (fi && fi->fh)
         {
@@ -229,12 +237,8 @@ static int xmp_getattr(const char *path, struct stat *stbuf,
                                 return 0;
                         }
                 }
-                if (myfh->path)
-                {
-                        actual_path = myfh->path;
-                }
-                else
-                        return 0;
+                actual_path = myfh->path;
+                return 0;
         }
         else
         {
@@ -404,7 +408,7 @@ static int xmp_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
                 const char *my_path = d->path;
                 const char *rel_path = (my_path[0] == '/') ? my_path + 1 : my_path;
 
-                char base_path[PATH_MAX];
+                char base_path[PATH_MAX - 5];
                 strncpy(base_path, rel_path, sizeof(base_path) - 1);
                 base_path[sizeof(base_path) - 1] = '\0';
 
@@ -442,8 +446,7 @@ static int xmp_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
                                 filename = base_path;
                         }
                         char v_name[NAME_MAX];
-                        snprintf(v_name, sizeof(v_name), "%s@%lu",
-                                 filename, i + 1);
+                        snprintf(v_name, sizeof(v_name), "%.*s@%lu", (int)(NAME_MAX - 32), filename, i + 1);
 
                         filler(buf, v_name, NULL, 0, 0);
                 }
@@ -499,7 +502,7 @@ static int xmp_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
                 {
                         memset(&st, 0, sizeof(st));
                         st.st_ino = d->entry->d_ino;
-				st.st_mode = d->entry->d_type << 12;
+                        st.st_mode = d->entry->d_type << 12;
                 }
                 nextoff = telldir(d->dp);
 #ifdef __FreeBSD__
@@ -567,7 +570,7 @@ static int xmp_mkdir(const char *path, mode_t mode)
 {
         if (is_internal_file(path))
                 return -ENOENT;
-        if(is_vls(path))
+        if (is_vls(path))
                 return -EPERM;
         int res;
         const char *rel_path = (path[0] == '/') ? path + 1 : path;
@@ -821,7 +824,7 @@ static int xmp_create(const char *path, mode_t mode, struct fuse_file_info *fi)
 {
         if (is_internal_file(path))
                 return -ENOENT;
-        if(is_vls(path) || is_virtfile(path))
+        if (is_vls(path) || is_virtfile(path))
                 return -EINVAL;
         int fd;
         const char *rel_path = (path[0] == '/') ? path + 1 : path;
@@ -877,15 +880,15 @@ static int xmp_open(const char *path, struct fuse_file_info *fi)
         if (is_virtfile(path))
         {
                 const char *rel_ptr = (path[0] == '/') ? path + 1 : path;
-                char base_path[PATH_MAX];
+                char base_path[PATH_MAX - 5];
                 strncpy(base_path, rel_ptr, sizeof(base_path) - 1);
                 base_path[sizeof(base_path) - 1] = '\0';
 
                 char *vls_ptr = strstr(base_path, ".vls/");
                 *vls_ptr = '\0';
-                char version_file[PATH_MAX + 3];
-                char version_table[PATH_MAX + 3];
-                char disk_file[PATH_MAX + 2];
+                char version_file[PATH_MAX];
+                char version_table[PATH_MAX];
+                char disk_file[PATH_MAX];
 
                 snprintf(version_file, sizeof(version_file), "%s..vf.", base_path);
                 snprintf(version_table, sizeof(version_table), "%s..vt.", base_path);

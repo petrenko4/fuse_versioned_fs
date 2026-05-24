@@ -2,4 +2,5 @@ build:
     gcc -fdiagnostics-color=always -Wall vfile_handler.c vtable_handler.c fs_helper.c myfs.c `pkg-config fuse3 --cflags --libs` -o myfs
 
 example usage:
+    mkdir mnt
     ./myfs mnt/

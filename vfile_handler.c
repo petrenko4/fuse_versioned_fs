@@ -104,7 +104,6 @@ uint64_t check_version(int fd_disk, int fd_file, int fd_vt, int fd_vf, uint64_t 
 int read_version(size_t read_size, off_t offset, char *buf, uint64_t version, int fd_disk, int fd_file, int fd_vt, int fd_vf, uint64_t *bytes_read)
 {
 
-    uint64_t buffer[BLOCK_SIZE / sizeof(uint64_t)];
     uint64_t vf_offset = 0;
     if (pread(fd_vt, &vf_offset, sizeof(vf_offset), version * sizeof(uint64_t)) == -1)
         return -errno;
@@ -121,7 +120,6 @@ int read_version(size_t read_size, off_t offset, char *buf, uint64_t version, in
     uint64_t affected_interval_right = (file_size < (offset + read_size))
                                            ? ((file_size + BLOCK_SIZE - 1) / BLOCK_SIZE)
                                            : (((offset + read_size) + BLOCK_SIZE - 1) / BLOCK_SIZE);
-    uint64_t next_version_off = vf_offset + 2 * sizeof(uint64_t) + ((file_size + BLOCK_SIZE - 1) / BLOCK_SIZE) * sizeof(uint64_t);
 
     vf_offset += 2 * sizeof(uint64_t);
 

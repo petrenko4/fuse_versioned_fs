@@ -36,7 +36,6 @@ uint64_t update_version_counter(int fd_table)
     if (pwrite(fd_table, &new_version, sizeof(new_version), 0) == -1)
         return -errno;
 
-    printf("Version updated");
     return new_version;
 }
 
