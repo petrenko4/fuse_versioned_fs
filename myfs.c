@@ -168,9 +168,9 @@ int fill_virtual_stats_reg_nofh(struct stat *stbuf, char *path)
                 *ext = '\0';
 
         char vt_name[PATH_MAX];
-        snprintf(vt_name, sizeof(vt_name), "%s.vt", base_path);
+        snprintf(vt_name, sizeof(vt_name), "%s..vt.", base_path);
         char vf_name[PATH_MAX];
-        snprintf(vf_name, sizeof(vf_name), "%s.vf", base_path);
+        snprintf(vf_name, sizeof(vf_name), "%s..vf.", base_path);
         int fd_vt = openat(root_fd, vt_name, O_RDONLY);
         if (fd_vt == -1)
                 return -errno;
@@ -411,9 +411,9 @@ static int xmp_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
                         *ext = '\0';
 
                 char vt_name[PATH_MAX];
-                snprintf(vt_name, sizeof(vt_name), "%s.vt", base_path);
+                snprintf(vt_name, sizeof(vt_name), "%s..vt.", base_path);
                 char vf_name[PATH_MAX];
-                snprintf(vf_name, sizeof(vf_name), "%s.vf", base_path);
+                snprintf(vf_name, sizeof(vf_name), "%s..vf.", base_path);
                 int fd_vt = openat(root_fd, vt_name, O_RDONLY);
                 if (fd_vt == -1)
                         return -errno;
@@ -589,9 +589,9 @@ static int xmp_unlink(const char *path)
         char version_table[MAX_PATH_LEN + 3];
         char disk_file[MAX_PATH_LEN + 2];
 
-        snprintf(version_file, sizeof(version_file), "%s.vf", rel_path);
-        snprintf(version_table, sizeof(version_table), "%s.vt", rel_path);
-        snprintf(disk_file, sizeof(disk_file), "%s.d", rel_path);
+        snprintf(version_file, sizeof(version_file), "%s..vf.", rel_path);
+        snprintf(version_table, sizeof(version_table), "%s..vt.", rel_path);
+        snprintf(disk_file, sizeof(disk_file), "%s..d.", rel_path);
 
         printf("[DEBUG] [myfs.c] xmp_unlink() called\n");
         res = unlinkat(root_fd, version_file, 0);
@@ -668,12 +668,12 @@ static int xmp_rename(const char *from, const char *to, unsigned int flags)
         char version_table_to[PATH_MAX];
         char disk_to[PATH_MAX];
 
-        snprintf(version_file_from, sizeof(version_file_from), "%s.vf", rel_path_from);
-        snprintf(version_table_from, sizeof(version_table_from), "%s.vt", rel_path_from);
-        snprintf(disk_from, sizeof(disk_from), "%s.d", rel_path_from);
-        snprintf(version_file_to, sizeof(version_file_to), "%s.vf", rel_path_to);
-        snprintf(version_table_to, sizeof(version_table_to), "%s.vt", rel_path_to);
-        snprintf(disk_to, sizeof(disk_to), "%s.d", rel_path_from);
+        snprintf(version_file_from, sizeof(version_file_from), "%s..vf.", rel_path_from);
+        snprintf(version_table_from, sizeof(version_table_from), "%s..vt.", rel_path_from);
+        snprintf(disk_from, sizeof(disk_from), "%s..d.", rel_path_from);
+        snprintf(version_file_to, sizeof(version_file_to), "%s..vf.", rel_path_to);
+        snprintf(version_table_to, sizeof(version_table_to), "%s..vt.", rel_path_to);
+        snprintf(disk_to, sizeof(disk_to), "%s..d.", rel_path_from);
 
         res = renameat(root_fd, version_file_from, root_fd, version_file_to);
         if (res == -1)
@@ -830,9 +830,9 @@ static int xmp_create(const char *path, mode_t mode, struct fuse_file_info *fi)
         char version_table[MAX_PATH_LEN + 3];
         char disk_file[MAX_PATH_LEN + 2];
 
-        snprintf(version_file, sizeof(version_file), "%s.vf", rel_path);
-        snprintf(version_table, sizeof(version_table), "%s.vt", rel_path);
-        snprintf(disk_file, sizeof(disk_file), "%s.d", rel_path);
+        snprintf(version_file, sizeof(version_file), "%s..vf.", rel_path);
+        snprintf(version_table, sizeof(version_table), "%s..vt.", rel_path);
+        snprintf(disk_file, sizeof(disk_file), "%s..d.", rel_path);
 
         int fd_vf = openat(root_fd, version_file, O_CREAT | O_RDWR, 0644);
         if (fd_vf == -1)
@@ -906,9 +906,9 @@ static int xmp_open(const char *path, struct fuse_file_info *fi)
                 char version_table[MAX_PATH_LEN + 3];
                 char disk_file[MAX_PATH_LEN + 2];
 
-                snprintf(version_file, sizeof(version_file), "%s.vf", base_path);
-                snprintf(version_table, sizeof(version_table), "%s.vt", base_path);
-                snprintf(disk_file, sizeof(disk_file), "%s.d", base_path);
+                snprintf(version_file, sizeof(version_file), "%s..vf.", base_path);
+                snprintf(version_table, sizeof(version_table), "%s..vt.", base_path);
+                snprintf(disk_file, sizeof(disk_file), "%s..d.", base_path);
 
                 h->fd_vf = openat(root_fd, version_file, O_RDONLY, 0644);
                 if (h->fd_vf == -1)
@@ -944,9 +944,9 @@ static int xmp_open(const char *path, struct fuse_file_info *fi)
                 char version_table[PATH_MAX + 3];
                 char disk_file[PATH_MAX + 2];
 
-                snprintf(version_file, sizeof(version_file), "%s.vf", rel_path);
-                snprintf(version_table, sizeof(version_table), "%s.vt", rel_path);
-                snprintf(disk_file, sizeof(disk_file), "%s.d", rel_path);
+                snprintf(version_file, sizeof(version_file), "%s..vf.", rel_path);
+                snprintf(version_table, sizeof(version_table), "%s..vt.", rel_path);
+                snprintf(disk_file, sizeof(disk_file), "%s..d.", rel_path);
 
                 int fd_vf = openat(root_fd, version_file, O_CREAT | O_RDWR, 0644);
                 if (fd_vf == -1)
@@ -1149,9 +1149,9 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
                 // char version_table[MAX_PATH_LEN + 3];
                 // char disk_file[MAX_PATH_LEN + 2];
 
-                // snprintf(version_file, sizeof(version_file), "%s.vf", base_path);
-                // snprintf(version_table, sizeof(version_table), "%s.vt", base_path);
-                // snprintf(disk_file, sizeof(disk_file), "%s.d", base_path);
+                // snprintf(version_file, sizeof(version_file), "%s..vf.", base_path);
+                // snprintf(version_table, sizeof(version_table), "%s..vt.", base_path);
+                // snprintf(disk_file, sizeof(disk_file), "%s..d.", base_path);
 
                 // myfh->fd_vf = openat(root_fd, version_file, O_CREAT | O_RDWR, 0644);
                 // if (myfh->fd_vf == -1)
