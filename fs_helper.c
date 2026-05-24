@@ -4,11 +4,6 @@
 #include "myfs.h"
 #include "stdint.h"
 
-void append_path(const char *path, char *out)
-{
-    // snprintf(out, 2 * MAX_PATH_LEN, "%s%s", mount_dir, path);
-}
-
 int is_internal_file(const char *path) {
     if (!path) {
         return 0;  

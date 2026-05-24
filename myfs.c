@@ -141,7 +141,9 @@ int fill_virtual_stats_reg(struct stat *stbuf, struct my_file_handle *myfh, uint
                         return -errno;
                 stbuf->st_size = file_size;
                 stbuf->st_mtime = stbuf->st_atime = stbuf->st_ctime = timestamp;
+                return 0;
         }
+        return 0;
 }
 
 int fill_virtual_stats_reg_nofh(struct stat *stbuf, char *path)
@@ -159,7 +161,7 @@ int fill_virtual_stats_reg_nofh(struct stat *stbuf, char *path)
 
         const char *rel_path = (actual_path[0] == '/') ? actual_path + 1 : actual_path;
 
-        char base_path[PATH_MAX];
+        char base_path[PATH_MAX - 5];
         strncpy(base_path, rel_path, sizeof(base_path) - 1);
         base_path[sizeof(base_path) - 1] = '\0';
 
@@ -199,6 +201,7 @@ int fill_virtual_stats_reg_nofh(struct stat *stbuf, char *path)
         close(fd_vf);
         close(fd_vt);
         free(actual_path);
+        return 0;
 }
 static int xmp_getattr(const char *path, struct stat *stbuf,
                        struct fuse_file_info *fi)
@@ -227,12 +230,8 @@ static int xmp_getattr(const char *path, struct stat *stbuf,
                                 return 0;
                         }
                 }
-                if (myfh->path)
-                {
-                        actual_path = myfh->path;
-                }
-                else
-                        return 0;
+                actual_path = myfh->path;
+                return 0;
         }
         else
         {
@@ -402,7 +401,7 @@ static int xmp_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
                 const char *my_path = d->path;
                 const char *rel_path = (my_path[0] == '/') ? my_path + 1 : my_path;
 
-                char base_path[PATH_MAX];
+                char base_path[PATH_MAX - 5];
                 strncpy(base_path, rel_path, sizeof(base_path) - 1);
                 base_path[sizeof(base_path) - 1] = '\0';
 
@@ -440,8 +439,7 @@ static int xmp_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
                                 filename = base_path;
                         }
                         char v_name[NAME_MAX];
-                        snprintf(v_name, sizeof(v_name), "%s@%lu",
-                                 filename, i + 1);
+                        snprintf(v_name, sizeof(v_name), "%.*s@%lu", (int)(NAME_MAX - 32), filename, i + 1);
 
                         filler(buf, v_name, NULL, 0, 0);
                 }
@@ -585,9 +583,9 @@ static int xmp_unlink(const char *path)
         const char *rel_path = (path[0] == '/') ? path + 1 : path;
         if (rel_path[0] == '\0')
                 rel_path = ".";
-        char version_file[MAX_PATH_LEN + 3];
-        char version_table[MAX_PATH_LEN + 3];
-        char disk_file[MAX_PATH_LEN + 2];
+        char version_file[PATH_MAX + 3];
+        char version_table[PATH_MAX + 3];
+        char disk_file[PATH_MAX + 2];
 
         snprintf(version_file, sizeof(version_file), "%s..vf.", rel_path);
         snprintf(version_table, sizeof(version_table), "%s..vt.", rel_path);
@@ -826,9 +824,9 @@ static int xmp_create(const char *path, mode_t mode, struct fuse_file_info *fi)
         if (fd == -1)
                 return -errno;
 
-        char version_file[MAX_PATH_LEN + 3];
-        char version_table[MAX_PATH_LEN + 3];
-        char disk_file[MAX_PATH_LEN + 2];
+        char version_file[PATH_MAX + 3];
+        char version_table[PATH_MAX + 3];
+        char disk_file[PATH_MAX + 2];
 
         snprintf(version_file, sizeof(version_file), "%s..vf.", rel_path);
         snprintf(version_table, sizeof(version_table), "%s..vt.", rel_path);
@@ -855,8 +853,8 @@ static int xmp_create(const char *path, mode_t mode, struct fuse_file_info *fi)
         h->fd_vf = fd_vf;
         h->fd_vt = fd_vt;
         h->fd_disk = fd_disk;
-        strncpy(h->path, rel_path, MAX_PATH_LEN - 1);
-        h->path[MAX_PATH_LEN - 1] = '\0';
+        strncpy(h->path, rel_path, PATH_MAX - 1);
+        h->path[PATH_MAX - 1] = '\0';
         h->is_virtual = 0;
         uint64_t file_size = 52;
         uint64_t version = update_version_counter(h->fd_vt);
@@ -896,15 +894,15 @@ static int xmp_open(const char *path, struct fuse_file_info *fi)
         if (is_virtfile(path))
         {
                 const char *rel_ptr = (path[0] == '/') ? path + 1 : path;
-                char base_path[PATH_MAX];
+                char base_path[PATH_MAX - 5];
                 strncpy(base_path, rel_ptr, sizeof(base_path) - 1);
                 base_path[sizeof(base_path) - 1] = '\0';
 
                 char *vls_ptr = strstr(base_path, ".vls/");
                 *vls_ptr = '\0';
-                char version_file[MAX_PATH_LEN + 3];
-                char version_table[MAX_PATH_LEN + 3];
-                char disk_file[MAX_PATH_LEN + 2];
+                char version_file[PATH_MAX + 3];
+                char version_table[PATH_MAX + 3];
+                char disk_file[PATH_MAX + 2];
 
                 snprintf(version_file, sizeof(version_file), "%s..vf.", base_path);
                 snprintf(version_table, sizeof(version_table), "%s..vt.", base_path);
@@ -928,8 +926,8 @@ static int xmp_open(const char *path, struct fuse_file_info *fi)
                 if (!myfh)
                         return -ENOMEM;
                 h->is_virtual = 1;
-                strncpy(h->path, path, MAX_PATH_LEN - 1);
-                h->path[MAX_PATH_LEN - 1] = '\0';
+                strncpy(h->path, path, PATH_MAX - 1);
+                h->path[PATH_MAX - 1] = '\0';
                 fi->fh = (uint64_t)h;
                 return 0;
         }
@@ -962,7 +960,7 @@ static int xmp_open(const char *path, struct fuse_file_info *fi)
                 if (fd_disk == -1)
                 {
                         vt_init(0, fd_vt);
-                        int fd_disk = openat(root_fd, disk_file, O_CREAT | O_RDWR | O_APPEND, 0644);
+                        fd_disk = openat(root_fd, disk_file, O_CREAT | O_RDWR | O_APPEND, 0644);
                 }
                 if (fd_disk == -1)
                         return -errno;
@@ -1028,8 +1026,6 @@ static int xmp_open(const char *path, struct fuse_file_info *fi)
                 h->fd_vf = fd_vf;
                 h->fd_vt = fd_vt;
                 h->fd_disk = fd_disk;
-
-                int trunced = 0;
         }
 
         // int fd_file = openat(root_fd, rel_path, O_RDWR, 0644);
@@ -1108,8 +1104,8 @@ static int xmp_open(const char *path, struct fuse_file_info *fi)
         if (res == -1)
                 return -errno;
         h->fd_file = res;
-        strncpy(h->path, rel_path, MAX_PATH_LEN - 1);
-        h->path[MAX_PATH_LEN - 1] = '\0';
+        strncpy(h->path, rel_path, PATH_MAX - 1);
+        h->path[PATH_MAX - 1] = '\0';
         h->is_virtual = 0;
         fi->fh = (uint64_t)h;
         return 0;
@@ -1145,9 +1141,9 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
 
                 // char *vls_ptr = strstr(base_path, ".vls/");
                 // *vls_ptr = '\0';
-                // char version_file[MAX_PATH_LEN + 3];
-                // char version_table[MAX_PATH_LEN + 3];
-                // char disk_file[MAX_PATH_LEN + 2];
+                // char version_file[PATH_MAX + 3];
+                // char version_table[PATH_MAX + 3];
+                // char disk_file[PATH_MAX + 2];
 
                 // snprintf(version_file, sizeof(version_file), "%s..vf.", base_path);
                 // snprintf(version_table, sizeof(version_table), "%s..vt.", base_path);
