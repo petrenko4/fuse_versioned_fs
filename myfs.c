@@ -91,20 +91,6 @@ int is_virtfile(const char *path)
         return 0;
 }
 
-int ends_with(const char *str, const char *suffix)
-{
-        if (!str || !suffix)
-                return 0;
-
-        size_t len_str = strlen(str);
-        size_t len_suffix = strlen(suffix);
-
-        if (len_suffix > len_str)
-                return 0;
-
-        return strcmp(str + len_str - len_suffix, suffix) == 0;
-}
-
 int fill_virtual_stats_dir(struct stat *stbuf)
 {
         memset(stbuf, 0, sizeof(struct stat));
@@ -160,7 +146,10 @@ int fill_virtual_stats_reg_nofh(struct stat *stbuf, char *path)
                 version = strtoull(at_ptr + 1, &endptr, 10);
         }
         else
+        {
+                free(actual_path);
                 return -ENOENT;
+        }
 
         const char *rel_path = (actual_path[0] == '/') ? actual_path + 1 : actual_path;
 
@@ -178,10 +167,10 @@ int fill_virtual_stats_reg_nofh(struct stat *stbuf, char *path)
         snprintf(vf_name, sizeof(vf_name), "%s..vf.", base_path);
         int fd_vt = openat(root_fd, vt_name, O_RDONLY);
         if (fd_vt == -1)
-                return -errno;
+                goto onerror;
         int fd_vf = openat(root_fd, vf_name, O_RDONLY);
         if (fd_vf == -1)
-                return -errno;
+                goto onerror;
 
         stbuf->st_mode = S_IFREG | 0444;
 
@@ -192,31 +181,37 @@ int fill_virtual_stats_reg_nofh(struct stat *stbuf, char *path)
 
         uint64_t vf_offset;
         if (pread(fd_vt, &vf_offset, sizeof(vf_offset), version * sizeof(uint64_t)) == -1)
-                return -errno;
+                goto onerror;
         uint64_t file_size;
         uint64_t timestamp;
         if (pread(fd_vf, &file_size, sizeof(file_size), vf_offset + sizeof(uint64_t)) == -1)
-                return -errno;
+                goto onerror;
         if (pread(fd_vf, &timestamp, sizeof(timestamp), vf_offset) == -1)
-                return -errno;
+                goto onerror;
         stbuf->st_size = file_size;
         stbuf->st_mtime = stbuf->st_atime = stbuf->st_ctime = timestamp;
         close(fd_vf);
         close(fd_vt);
         free(actual_path);
-
         return 0;
+
+onerror:
+        free(actual_path);
+        return -errno;
 }
 static int xmp_getattr(const char *path, struct stat *stbuf,
                        struct fuse_file_info *fi)
 {
 
-    
         printf("[DEBUG] [myfs.c] xmp_getattr() called\n");
         char *actual_path;
+        struct my_file_handle *myfh;
         if (fi && fi->fh)
         {
-                struct my_file_handle *myfh = (struct my_file_handle *)fi->fh;
+                myfh = (struct my_file_handle*)fi->fh;
+                actual_path = strdup(myfh->path);
+                if (!actual_path)
+                        return -ENOMEM;
                 if (myfh->is_virtual)
                 {
                         if (is_virtfile(myfh->path))
@@ -229,66 +224,70 @@ static int xmp_getattr(const char *path, struct stat *stbuf,
                                         version_num = strtoull(at_ptr + 1, &endptr, 10);
                                 }
                                 fill_virtual_stats_reg(stbuf, myfh, version_num);
+                                free(actual_path);
                                 return 0;
                         }
                         else
                         {
                                 fill_virtual_stats_dir(stbuf);
+                                free(actual_path);
                                 return 0;
                         }
                 }
-                actual_path = myfh->path;
-                return 0;
+                else
+                {
+                        int res;
+                        res = fstat(myfh->fd_file, stbuf);
+                        if (res == -1)
+                                goto onerror;
+
+                        return 0;
+                }
         }
         else
         {
-                if (path == NULL)
-                {
-                        actual_path = NULL;
-                }
-                else
-                {
-                        actual_path = strdup(path);
-                        if (!actual_path)
-                                return -ENOMEM;
-                }
+                actual_path = strdup(path);
+                if (!actual_path)
+                        return -ENOMEM;
         }
         int res;
 
         if (is_internal_file(actual_path))
+        {
+                free(actual_path);
                 return -ENOENT;
+        }
+
         if (is_vls(actual_path))
         {
                 fill_virtual_stats_dir(stbuf);
+                free(actual_path);
                 return 0;
         }
         if (is_virtfile(actual_path))
         {
 
                 fill_virtual_stats_reg_nofh(stbuf, actual_path);
+                free(actual_path);
                 return 0;
         }
-        if (fi)
-        {
-                struct my_file_handle *myfh = (struct my_file_handle *)fi->fh;
-                res = fstat(myfh->fd_file, stbuf);
-        }
-        else
-        {
-                const char *rel_path = (path[0] == '/') ? path + 1 : path;
+        const char *rel_path = (path[0] == '/') ? path + 1 : path;
 
-                if (rel_path[0] == '\0')
-                        rel_path = ".";
+        if (rel_path[0] == '\0')
+                rel_path = ".";
 
-                // printf("[DEBUG] [myfs.c] xmp_getattr() called for: %s\n", rel_path);
+        // printf("[DEBUG] [myfs.c] xmp_getattr() called for: %s\n", rel_path);
 
-                res = fstatat(root_fd, rel_path, stbuf, AT_SYMLINK_NOFOLLOW);
-        }
+        res = fstatat(root_fd, rel_path, stbuf, AT_SYMLINK_NOFOLLOW);
 
         if (res == -1)
-                return -errno;
+                goto onerror;
 
         return 0;
+
+onerror:
+        free(actual_path);
+        return -errno;
 }
 
 static int xmp_access(const char *path, int mask)
@@ -325,7 +324,7 @@ static int xmp_readlink(const char *path, char *buf, size_t size)
                 rel_path = ".";
         printf("[DEBUG] [myfs.c] xmp_readlink() called\n");
 
-        res = readlinkat(root_fd, path, buf, size - 1);
+        res = readlinkat(root_fd, rel_path, buf, size - 1);
         if (res == -1)
                 return -errno;
 
@@ -346,12 +345,11 @@ static int xmp_opendir(const char *path, struct fuse_file_info *fi)
 {
         if (is_internal_file(path))
                 return -ENOENT;
-        int res;
+        struct xmp_dirp *d = malloc(sizeof(struct xmp_dirp));
+        if (!d)
+                return -ENOMEM;
         if (strstr(path, ".vls"))
         {
-                struct xmp_dirp *d = malloc(sizeof(struct xmp_dirp));
-                if (!d)
-                        return -ENOMEM;
 
                 d->dp = NULL;
                 d->is_virtual = 1;
@@ -364,10 +362,6 @@ static int xmp_opendir(const char *path, struct fuse_file_info *fi)
 
                 return 0;
         }
-        struct xmp_dirp *d = malloc(sizeof(struct xmp_dirp));
-        if (d == NULL)
-                return -ENOMEM;
-
         strncpy(d->path, path, PATH_MAX - 1);
         d->path[PATH_MAX - 1] = '\0';
 
@@ -377,19 +371,20 @@ static int xmp_opendir(const char *path, struct fuse_file_info *fi)
         printf("[DEBUG] [myfs.c] xmp_opendir() called\n");
         int sub_fd = openat(root_fd, rel_path, O_RDONLY | O_DIRECTORY);
         if (sub_fd == -1)
-                return -errno;
+                goto onerror;
         d->dp = fdopendir(sub_fd);
         if (d->dp == NULL)
         {
-                res = -errno;
-                free(d);
-                return res;
+                goto onerror;
         }
         d->offset = 0;
         d->entry = NULL;
         d->is_virtual = 0;
         fi->fh = (unsigned long)d;
         return 0;
+onerror:
+        free(d);
+        return -errno;
 }
 
 static inline struct xmp_dirp *get_dirp(struct fuse_file_info *fi)
@@ -896,21 +891,18 @@ static int xmp_open(const char *path, struct fuse_file_info *fi)
 
                 h->fd_vf = openat(root_fd, version_file, O_RDWR, 0644);
                 if (h->fd_vf == -1)
-                        return -errno;
+                        goto onerror;
 
                 h->fd_vt = openat(root_fd, version_table, O_RDONLY, 0644);
                 if (h->fd_vt == -1)
-                        return -errno;
+                        goto onerror;
 
                 h->fd_disk = openat(root_fd, disk_file, O_RDONLY, 0644);
                 if (h->fd_disk == -1)
-                        return -errno;
+                        goto onerror;
                 h->fd_file = openat(root_fd, base_path, O_RDONLY, 0644);
                 if (h->fd_disk == -1)
-                        return -errno;
-                struct my_file_handle *myfh = malloc(sizeof(struct my_file_handle));
-                if (!myfh)
-                        return -ENOMEM;
+                        goto onerror;
                 h->is_virtual = 1;
                 strncpy(h->path, path, PATH_MAX - 1);
                 h->path[PATH_MAX - 1] = '\0';
@@ -933,11 +925,11 @@ static int xmp_open(const char *path, struct fuse_file_info *fi)
 
         int fd_vf = openat(root_fd, version_file, O_CREAT | O_RDWR, 0644);
         if (fd_vf == -1)
-                return -errno;
+                goto onerror;
 
         int fd_vt = openat(root_fd, version_table, O_CREAT | O_RDWR, 0644);
         if (fd_vt == -1)
-                return -errno;
+                goto onerror;
         /* Enable direct_io when open has flags O_DIRECT to enjoy the feature
            parallel_direct_writes (i.e., to get a shared lock, not exclusive lock,
            for writes to the same file). */
@@ -948,7 +940,7 @@ static int xmp_open(const char *path, struct fuse_file_info *fi)
                 fd_disk = openat(root_fd, disk_file, O_CREAT | O_RDWR | O_APPEND, 0644);
         }
         if (fd_disk == -1)
-                return -errno;
+                goto onerror;
 
         if (fi->flags & O_DIRECT)
         {
@@ -967,10 +959,10 @@ static int xmp_open(const char *path, struct fuse_file_info *fi)
 
         int fd_file = openat(root_fd, rel_path, O_RDWR, 0644);
         if (fd_file == -1)
-                return -errno;
+                goto onerror;
         struct stat sb;
         if (fstat(fd_file, &sb) == -1)
-                return -errno;
+                goto onerror;
         uint64_t file_size = sb.st_size;
         if (fi->flags & O_TRUNC)
         {
@@ -984,25 +976,25 @@ static int xmp_open(const char *path, struct fuse_file_info *fi)
                         // update version table file
                         uint64_t offset_for_vf = lseek(h->fd_vf, 0, SEEK_END);
                         if (pwrite(h->fd_vt, &offset_for_vf, sizeof(offset_for_vf), vt_off) != sizeof(offset_for_vf))
-                                return -errno;
+                                goto onerror;
 
                         // write version number to the version file
                         uint64_t timestamp = (uint64_t)time(NULL);
 
                         if (pwrite(h->fd_vf, &timestamp, sizeof(timestamp), offset_for_vf) != sizeof(timestamp))
-                                return -errno;
+                                goto onerror;
                         if (pwrite(h->fd_vf, &file_size, sizeof(file_size), offset_for_vf + sizeof(uint64_t)) != sizeof(version))
-                                return -errno;
+                                goto onerror;
                         uint64_t ceil_block = ((file_size + BLOCK_SIZE - 1) / BLOCK_SIZE);
                         uint64_t value = MAKE_VERSION(version + 1);
                         for (uint64_t i = 0; i < ceil_block; i += 1)
                         {
                                 if (pwrite(fd_vf, &value, sizeof(value), (offset_for_vf + 2 * sizeof(uint64_t) + i * sizeof(uint64_t))) == -1)
-                                        return -errno;
+                                        goto onerror;
                         }
 
                         if (store_blocks(file_size, 0, h->fd_disk, fd_file, h->fd_vt, h->fd_vf) == -1)
-                                return -errno;
+                                goto onerror;
                 }
         }
         else
@@ -1017,22 +1009,22 @@ static int xmp_open(const char *path, struct fuse_file_info *fi)
                                 // update version table file
                                 uint64_t offset_for_vf = lseek(h->fd_vf, 0, SEEK_END);
                                 if (pwrite(h->fd_vt, &offset_for_vf, sizeof(offset_for_vf), vt_off) != sizeof(offset_for_vf))
-                                        return -errno;
+                                        goto onerror;
 
                                 // write version number to the version file
                                 uint64_t timestamp = (uint64_t)time(NULL);
 
                                 if (pwrite(h->fd_vf, &timestamp, sizeof(timestamp), offset_for_vf) != sizeof(timestamp))
-                                        return -errno;
+                                        goto onerror;
                                 if (pwrite(h->fd_vf, &file_size, sizeof(file_size), offset_for_vf + sizeof(uint64_t)) != sizeof(version))
-                                        return -errno;
+                                        goto onerror;
 
                                 uint64_t ceil_block = ((file_size + BLOCK_SIZE - 1) / BLOCK_SIZE);
                                 uint64_t value = MAKE_VERSION(version + 1);
                                 for (uint64_t i = 0; i < ceil_block; i += 1)
                                 {
                                         if (pwrite(fd_vf, &value, sizeof(value), (offset_for_vf + 2 * sizeof(uint64_t) + i * sizeof(uint64_t))) == -1)
-                                                return -errno;
+                                                goto onerror;
                                 }
                         }
                 }
@@ -1047,9 +1039,16 @@ static int xmp_open(const char *path, struct fuse_file_info *fi)
         }
         res = openat(root_fd, rel_path, fi->flags);
         if (res == -1)
-                return -errno;
+                goto onerror;
         h->fd_file = res;
         return 0;
+onerror:
+        close(h->fd_disk);
+        close(h->fd_file);
+        close(h->fd_vf);
+        close(h->fd_vt);
+        free(h);
+        return -errno;
 }
 
 static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
@@ -1234,9 +1233,7 @@ static int xmp_release(const char *path, struct fuse_file_info *fi)
                 return -ENOENT;
         printf("[DEBUG] [myfs.c] xmp_release() called\n");
         struct my_file_handle *myfh = (struct my_file_handle *)fi->fh;
-        //?
         if (myfh->is_virtual)
-
         {
                 if (myfh->fd_file)
                         close(myfh->fd_file);
@@ -1247,17 +1244,17 @@ static int xmp_release(const char *path, struct fuse_file_info *fi)
                 if (myfh->fd_disk)
                         close(myfh->fd_disk);
         }
-        else
-        {
-                if (myfh->fd_file)
-                        close(myfh->fd_file);
-                if (myfh->fd_vf)
-                        close(myfh->fd_vf);
-                if (myfh->fd_vt)
-                        close(myfh->fd_vt);
-                if (myfh->fd_disk)
-                        close(myfh->fd_disk);
-        }
+        // else
+        // {
+        //         if (myfh->fd_file)
+        //                 close(myfh->fd_file);
+        //         if (myfh->fd_vf)
+        //                 close(myfh->fd_vf);
+        //         if (myfh->fd_vt)
+        //                 close(myfh->fd_vt);
+        //         if (myfh->fd_disk)
+        //                 close(myfh->fd_disk);
+        // }
 
         free(myfh);
         return 0;
