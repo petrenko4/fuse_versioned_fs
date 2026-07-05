@@ -119,6 +119,12 @@ int fill_virtual_stats_reg(struct stat *stbuf, struct my_file_handle *myfh, uint
                 stbuf->st_uid = getuid();
                 stbuf->st_gid = getgid();
 
+                uint64_t max_version;
+                if (pread(myfh->fd_vt, &max_version, sizeof(max_version), 0) == -1)
+                        return -errno;
+                if (max_version < version)
+                        return -EINVAL;
+
                 uint64_t vf_offset;
                 if (pread(myfh->fd_vt, &vf_offset, sizeof(vf_offset), version * sizeof(uint64_t)) == -1)
                         return -errno;
@@ -168,6 +174,18 @@ int fill_virtual_stats_reg_nofh(struct stat *stbuf, char *path)
         int fd_vt = openat(root_fd, vt_name, O_RDONLY);
         if (fd_vt == -1)
                 goto onerror;
+        uint64_t max_version;
+        if (pread(fd_vt, &max_version, sizeof(max_version), 0) == -1)
+                return -errno;
+        if (max_version < version)
+        {
+                fprintf(stderr, "Returning ENOENT from getattr\n");
+
+                close(fd_vt);
+                errno = ENOENT;
+                fprintf(stderr, "Returning %d\n", errno);
+                return -errno;
+        }
         int fd_vf = openat(root_fd, vf_name, O_RDONLY);
         if (fd_vf == -1)
                 goto onerror;
@@ -208,7 +226,7 @@ static int xmp_getattr(const char *path, struct stat *stbuf,
         struct my_file_handle *myfh;
         if (fi && fi->fh)
         {
-                myfh = (struct my_file_handle*)fi->fh;
+                myfh = (struct my_file_handle *)fi->fh;
                 actual_path = strdup(myfh->path);
                 if (!actual_path)
                         return -ENOMEM;
@@ -223,7 +241,13 @@ static int xmp_getattr(const char *path, struct stat *stbuf,
                                         char *endptr;
                                         version_num = strtoull(at_ptr + 1, &endptr, 10);
                                 }
-                                fill_virtual_stats_reg(stbuf, myfh, version_num);
+                                int res;
+                                res = fill_virtual_stats_reg(stbuf, myfh, version_num);
+                                if (res != 0)
+                                {
+                                        free(actual_path);
+                                        return res;
+                                }
                                 free(actual_path);
                                 return 0;
                         }
@@ -266,8 +290,12 @@ static int xmp_getattr(const char *path, struct stat *stbuf,
         }
         if (is_virtfile(actual_path))
         {
-
-                fill_virtual_stats_reg_nofh(stbuf, actual_path);
+                res = fill_virtual_stats_reg_nofh(stbuf, actual_path);
+                if (res != 0)
+                {
+                        free(actual_path);
+                        return res;
+                }
                 free(actual_path);
                 return 0;
         }
